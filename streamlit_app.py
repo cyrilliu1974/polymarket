@@ -468,19 +468,58 @@ with st.sidebar:
                     st.caption(f"🔄 Translated: `{translated}`")
                     search_keyword = translated
                 except: pass
+
             try:
-                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=50&active=true&closed=false&order=volume_24hr&ascending=false"
+                # 1. 恢復最穩定的 API 參數，單純把 limit 提高到 50，讓我們自己篩選
+                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=50&active=true&closed=false"
                 resp = requests.get(url, timeout=10)
-                markets = resp.json()
-                if not markets: st.warning("No results / 找不到結果")
+                
+                if resp.ok:
+                    data = resp.json()
+                    
+                    # 防呆機制：確保 data 是一個陣列 (List)，如果 API 回傳錯誤字典，就把它變成空陣列
+                    markets = data if isinstance(data, list) else data.get('data', [])
+                    
+                    if not isinstance(markets, list) or len(markets) == 0:
+                        st.info("目前無符合的活躍市場。")
+                    else:
+                        search_terms = search_keyword.lower().split()
+                        accurate_markets = []
+                        
+                        for m in markets:
+                            # 雙重防呆：確保迴圈裡面的項目真的是字典 (Dict)
+                            if not isinstance(m, dict):
+                                continue
+                                
+                            target_text = f"{m.get('question', '')} {m.get('slug', '')}".lower()
+                            
+                            # 精準篩選：使用者的每一個關鍵字都必須在標題或 slug 內
+                            if all(term in target_text for term in search_terms):
+                                accurate_markets.append(m)
+                        
+                        # 2. Python 本地排序：依照 24 小時交易量 (volume24hr) 由高到低排序，過濾掉沒人玩的垃圾市場
+                        accurate_markets.sort(
+                            key=lambda x: float(x.get('volume24hr', 0) or 0), 
+                            reverse=True
+                        )
+                        
+                        # 3. 抓取最熱門的前 10 筆結果
+                        top_results = accurate_markets[:10]
+                        
+                        if not top_results:
+                            st.info("沒有找到高度相關的市場，請嘗試更換或縮短關鍵字。")
+                        else:
+                            st.success(f"✅ 找到 {len(top_results)} 個高度相關市場")
+                            for m in top_results:
+                                st.code(m.get('slug', 'N/A'))
+                                # 順便把交易量顯示出來，讓使用者知道這個市場熱不熱絡！
+                                vol = float(m.get('volume24hr', 0) or 0)
+                                st.caption(f"📝 {m.get('question', '未知問題')} | 💰 24h Vol: ${vol:,.0f}")
                 else:
-                    st.success(f"Found {len(markets)} markets:")
-                    for m in markets:
-                        slug = m.get('slug', '')
-                        question = m.get('question', slug)
-                        st.code(slug)
-                        st.caption(f"{question}")
-            except Exception as e: st.error(f"Error: {e}")
+                    st.error(f"搜尋失敗 (狀態碼: {resp.status_code})")
+            except Exception as e:
+                st.error(f"連線異常: {str(e)}")
+
     st.divider()
     st.subheader("🔥 Hot Slugs / 熱門參考")
     st.info("• `will-china-invade-taiwan-before-2027` \n • `will-bitcoin-hit-100k-in-march` ")
