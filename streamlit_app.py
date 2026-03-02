@@ -301,11 +301,28 @@ with tab1:
 with tab2:
     st.markdown("**自動掃描全市場，找出「即將結算 + YES 高價」/ Auto-scan all markets for 'near-settlement + high YES price' candidates.**")
     st.caption("獨立工具 / Independent tool.")
-    st.info("""
-💡 **什麼是掃尾盤？ / What is Tail Sweeping?**
-當事件結果已幾乎確定，YES 價格可能在 0.97。買入等待結算拿回 $1，賺取確定性收益。
-**Risk / 風險**: Black swan events (reversals, cancellations) can wipe out 0.99 chips.
-    """)
+    scan_direction = st.radio(
+        "掃尾盤方向 / Sweep Direction",
+        options=["YES 尾盤（事件即將發生）", "NO 尾盤（事件即將未發生）"],
+        horizontal=True
+    )
+    is_yes_sweep = (scan_direction == "YES 尾盤（事件即將發生）")
+
+    if is_yes_sweep:
+        st.info("""
+💡 **YES 尾盤**：當事件結果已幾乎確定，YES 價格停在 0.97 附近。買入等結算拿回 $1，賺取確定性收益。
+
+⚠️ **風險**：黑天鵝事件（裁判反轉、比賽取消）可能讓 0.99 的籌碼瞬間歸零。建議單一市場最多投入總資金的 1/10。
+        """)
+    else:
+        st.info("""
+💡 **NO 尾盤**：當事件遲遲未發生，NO 價格會隨時間流逝自然升高，市場情緒卻滯後於現實。
+
+策略：找 YES 價格極低（< 5%）且即將結算的市場，買入 NO，等待事件未發生得回 $1。
+
+⚠️ **風險**：若事件突然發生，擔持的 NO 就會歸零。與 YES 尾盤的風險屬性相同。
+        """)
+
     st.divider()
 
     col_s1, col_s2 = st.columns(2)
@@ -313,14 +330,21 @@ with tab2:
         hours_ahead = st.slider(
             "結算時間 (小時內) / Settlement within (hrs)",
             min_value=1, max_value=72, value=24, step=1,
-            help="越小越近，黑天鵝風險窗口越短 / Smaller window means less time for black swans."
+            help="越小越近，確定性越高，黑天鵝時間窗口越短"
         )
     with col_s2:
-        min_yes_price = st.slider(
-            "YES 價格下限 / Min YES Price",
-            min_value=0.80, max_value=0.99, value=0.95, step=0.01,
-            help="0.95 means targeting markets where outcomes are nearly certain. / 代表市場已極度篤定結果。"
-        )
+        if is_yes_sweep:
+            price_threshold = st.slider(
+                "YES 價格下限 / Min YES Price",
+                min_value=0.80, max_value=0.99, value=0.95, step=0.01,
+                help="越高代表市場越篤定，但剩餘獲利空間也越小"
+            )
+        else:
+            price_threshold = st.slider(
+                "YES 價格上限（越低代表 NO 越篤定）/ Max YES Price",
+                min_value=0.01, max_value=0.20, value=0.05, step=0.01,
+                help="設 0.05 代表只找 YES < 5% 的市場，也就是 NO > 95% 的市場"
+            )
     scanner_limit = st.slider("顯示數量 / Results Limit", min_value=5, max_value=50, value=20, step=5)
     debug_scanner = st.checkbox("🐛 Debug 模式 / Debug Mode", value=False)
 
@@ -369,31 +393,50 @@ with tab2:
                 candidates = []
                 for m in scan_markets:
                     yes_price = resolve_yes_price(m)
-                    if yes_price is not None and yes_price >= min_yes_price:
+                    if yes_price is None:
+                        continue
+                    if is_yes_sweep and yes_price >= price_threshold:
+                        candidates.append({**m, '_yes_price_resolved': yes_price})
+                    elif not is_yes_sweep and yes_price <= price_threshold:
                         candidates.append({**m, '_yes_price_resolved': yes_price})
                 candidates = candidates[:scanner_limit]
 
                 if not candidates:
-                    st.info(f"找不到符合條件的市場 / No markets found (Future {hours_ahead}h, YES ≥ {min_yes_price:.0%})")
+                    if is_yes_sweep:
+                        st.info(f"找不到符合條件的市場（未來 {hours_ahead}h 內結算且 YES ≥ {price_threshold:.0%}）")
+                    else:
+                        st.info(f"找不到符合條件的市場（未來 {hours_ahead}h 內結算且 YES ≤ {price_threshold:.0%}）")
+                    st.caption("建議放寬條件後再試。體育賽事結束後是最容易找到的時機。")
                 else:
-                    st.success(f"找到 {len(candidates)} 個候選市場 / Found {len(candidates)} candidates")
+                    if is_yes_sweep:
+                        st.success(f"找到 {len(candidates)} 個 YES 尾盤候選")
+                        st.caption("以下市場 YES 價格偏高且即將結算，進場前請自行判斷黑天鵝風險。")
+                    else:
+                        st.success(f"找到 {len(candidates)} 個 NO 尾盤候選")
+                        st.caption("以下市場 YES 極低（事件幾乎不會發生），即將結算。買入 NO 等待事件未發生即可收回 $1。")
                     for m in candidates:
                         yes_price = m.get('_yes_price_resolved', 0)
+                        no_price  = 1 - yes_price
                         question  = m.get('question', m.get('slug', ''))
                         slug      = m.get('slug', '')
                         end_date  = m.get('endDateIso') or m.get('endDate') or '未知'
                         volume    = m.get('volume') or m.get('volume24hr') or 0
-                        profit_pct = (1 - yes_price) * 100
+                        profit_pct = (1 - yes_price) * 100 if is_yes_sweep else yes_price * 100
                         cols = st.columns([4, 1, 1, 1])
                         with cols[0]:
                             st.markdown(f"**{question}**")
-                            st.caption(f"`{slug}` ｜ 結算 / End: {str(end_date)[:16]}")
-                        with cols[1]: st.metric("YES 價格 / Price", f"{yes_price:.3f}")
-                        with cols[2]: st.metric("預期收益 / ROI", f"{profit_pct:.1f}%")
+                            st.caption(f"`{slug}` ｜ 結算: {str(end_date)[:16]}")
+                        with cols[1]:
+                            if is_yes_sweep:
+                                st.metric("YES 價格", f"{yes_price:.3f}")
+                            else:
+                                st.metric("NO 價格", f"{no_price:.3f}")
+                        with cols[2]:
+                            st.metric("剩餘獲利空間", f"{profit_pct:.1f}%")
                         with cols[3]:
                             try: vol_str = f"${float(volume):,.0f}"
                             except: vol_str = "N/A"
-                            st.metric("交易量 / Volume", vol_str)
+                            st.metric("交易量", vol_str)
                         st.divider()
             except Exception as e:
                 st.error(f"掃描失敗 / Scan Failed: {e}")
