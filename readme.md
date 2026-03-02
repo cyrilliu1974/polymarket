@@ -1,12 +1,4 @@
-這份專案結合了金融工程與預測市場分析，核心在於利用 Copula 模型捕捉 Polymarket 上多個事件之間的「尾部相關性」（Tail Dependence）。以下是為此專案撰寫的 `README.md` 檔案，包含中英文對照與技術分析。
-
-
-
----
-
-
-
-\# 📊 Polymarket Copula \& Tail Sweeper Bot
+\\# 📊 Polymarket Copula \& Tail Sweeper Bot
 
 
 
