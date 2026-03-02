@@ -16,8 +16,8 @@ st.title("📊 Polymarket Copula Bot (聯合機率工具(Joint Probability Tool)
 
 # ==================== 兩個功能用 Tab 區隔(Two Features Separated by Tabs) / Tabs Layout ====================
 tab1, tab2 = st.tabs([
-    "🔗 功能一：聯合機率模擬(Joint Probability Simulation) (Copula Simulation)",
-    "🏁 功能二：掃尾盤篩選器(Tail Sweeper) (Tail Sweeper)"
+    "🔗 Joint Probability Simulation)",
+    "🏁 Tail Sweeper"
 ])
 
 # ==============================================================
