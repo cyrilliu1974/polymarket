@@ -470,8 +470,8 @@ with st.sidebar:
                 except: pass
 
             try:
-                # 1. 恢復最穩定的 API 參數，單純把 limit 提高到 50，讓我們自己篩選
-                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=50&active=true&closed=false"
+                # 1. 恢復最穩定的 API 參數，單純把 limit 提高到 100，讓我們自己篩選
+                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=200&active=true&closed=false"
                 resp = requests.get(url, timeout=10)
                 
                 if resp.ok:
