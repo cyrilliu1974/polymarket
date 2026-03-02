@@ -174,6 +174,67 @@ with tab1:
                 st.info("市場價格已接近 Copula 模擬，沒有明顯 edge，可觀望。")
             st.caption(f"模擬次數：{num_sim:,} 次 ｜ Copula：T（自由度 4）｜ 有效相關性強度：{effective_corr}")
 
+            # ── Yes Bias 偵測 ──
+            from datetime import datetime, timezone
+            yes_bias_flags = []
+            yes_bias_debug = []  # 收集每個市場的檢查狀況
+            for _mp_slug, _prob_str in market_probs:
+                try:
+                    _yes_p = float(_prob_str) / 100
+                    _resp = requests.get(
+                        f"https://gamma-api.polymarket.com/markets?slug={_mp_slug}",
+                        timeout=10
+                    )
+                    _data = _resp.json()
+                    if _data:
+                        _end_raw = _data[0].get('endDate') or _data[0].get('end_date') or ''
+                        if _end_raw:
+                            if len(_end_raw) == 10:
+                                _end_raw += 'T00:00:00Z'
+                            _end_dt = datetime.fromisoformat(_end_raw.replace('Z', '+00:00'))
+                            _days_left = (_end_dt - datetime.now(timezone.utc)).days
+                            yes_bias_debug.append((_mp_slug, _yes_p, _days_left))
+                            if _yes_p > 0.7 and _days_left > 30:
+                                yes_bias_flags.append((_mp_slug, _yes_p, _days_left))
+                        else:
+                            yes_bias_debug.append((_mp_slug, _yes_p, None))
+                    else:
+                        yes_bias_debug.append((_mp_slug, _yes_p, None))
+                except Exception as _e:
+                    yes_bias_debug.append((_mp_slug, None, f"錯誤：{_e}"))
+
+            st.divider()
+            st.subheader("🧠 Yes Bias 偵測")
+            with st.expander("什麼是 Yes Bias？點此展開說明"):
+                st.markdown("""
+**預測市場普遍存在「Yes Bias」（正面結果高估偏差）**
+
+研究顯示，預測市場參與者傾向於高估正面事件（YES）發生的機率，原因包括：
+- **情緒驅動**：人們天生對正面結果更有期待感，容易過度樂觀
+- **時間滯後**：市場情緒往往慢於現實，臨近結算日時 NO 的價值會自然增長，但價格尚未反映
+- **資訊不對稱**：散戶買 YES 的傾向遠高於買 NO，造成系統性高估
+
+> **觸發條件**：YES 價格 > 70% 且距結算超過 30 天，才會出現警示。
+> **實戰啟示**：符合條件的市場，考慮**買 NO** 或**等待更接近結算日**再入場，期望值可能更高。
+                """)
+
+            # 顯示每個市場的 Yes Bias 檢查結果
+            for _item in yes_bias_debug:
+                _mp_slug, _yes_p, _days = _item
+                if isinstance(_days, str):
+                    # 發生錯誤
+                    st.caption(f"`{_mp_slug}` — {_days}")
+                elif _days is None:
+                    st.caption(f"`{_mp_slug}` — 無法取得結算日，跳過 Yes Bias 檢查")
+                elif _yes_p > 0.7 and _days > 30:
+                    _l1 = f"⚠️ {_mp_slug} | YES: {_yes_p:.0%} | 距結算還有 {_days} 天"
+                    _l2 = "市場可能存在 Yes Bias，建議考慮買 No，或等結算日更近再入場"
+                    st.warning(_l1 + chr(10) + chr(10) + _l2)
+                elif _yes_p > 0.7:
+                    st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，距結算僅 **{_days} 天**，接近結算，Yes Bias 影響較小")
+                else:
+                    st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，未達 Yes Bias 門檻（需 > 70%），無需特別注意")
+
             st.divider()
             st.subheader("🔬 進階分析")
             st.caption("以下兩項分析提供額外參考視角，幫助你更全面理解市場定價。")
