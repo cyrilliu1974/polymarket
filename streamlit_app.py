@@ -33,8 +33,8 @@ with tab1:
     st.caption("填入 Polymarket Slug (2-5 markets) / Enter 2-5 slugs from Polymarket.")
 
     default_slugs = [
-        "will-china-invade-taiwan-before-2027",
-        "china-x-taiwan-military-clash-before-2027",
+        "will-trump-nominate-kevin-warsh-as-the-next-fed-chair",
+        "russia-ukraine-ceasefire-before-gta-vi-554",
         "", "", ""
     ]
     slug_inputs = []
@@ -469,7 +469,7 @@ with st.sidebar:
                     search_keyword = translated
                 except: pass
             try:
-                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=10&active=true&closed=false"
+                url = f"https://gamma-api.polymarket.com/markets?q={search_keyword}&limit=50&active=true&closed=false&order=volume_24hr&ascending=false"
                 resp = requests.get(url, timeout=10)
                 markets = resp.json()
                 if not markets: st.warning("No results / 找不到結果")
