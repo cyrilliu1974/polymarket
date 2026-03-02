@@ -473,67 +473,44 @@ with st.sidebar:
                     pass
             
             try:
-                # 策略更新：改查 /events 節點！
-                # Polymarket 的關鍵字通常存在「事件(Event)」標題，而非單一「市場(Market)」問題中
                 search_terms = search_keyword.lower().split()
+                all_markets = []
                 
-                # 1. 透過 API 關鍵字搜尋 Events
-                url1 = f"https://gamma-api.polymarket.com/events?q={search_keyword}&limit=50&active=true&closed=false"
-                r1 = requests.get(url1, timeout=10)
-                events1 = r1.json() if r1.ok else []
-                events1 = events1 if isinstance(events1, list) else events1.get('data', [])
+                # 1. 戳 API 8 次，把全站最新的 1600 個活躍市場抓回記憶體
+                with st.spinner("🚀 深度檢索全站活躍市場中 (約需 2-3 秒) / Deep searching active markets..."):
+                    for offset in range(0, 1600, 200):
+                        url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}"
+                        resp = requests.get(url, timeout=10)
+                        if not resp.ok: 
+                            break
+                        batch = resp.json()
+                        if not batch or not isinstance(batch, list): 
+                            break
+                        all_markets.extend(batch)
                 
-                # 2. 備用池：抓取全站熱門前 100 名 Events (依 volume_24hr 排序)，防止 API 的 q 參數漏掉熱門市場
-                url2 = f"https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&order=volume_24hr"
-                r2 = requests.get(url2, timeout=10)
-                events2 = r2.json() if r2.ok else []
-                events2 = events2 if isinstance(events2, list) else events2.get('data', [])
-                
-                all_events = events1 + events2
                 valid_markets = []
                 seen_slugs = set()
                 
-                for ev in all_events:
-                    if not isinstance(ev, dict):
+                # 2. 用 Python 本地去比對字串
+                for m in all_markets:
+                    if not isinstance(m, dict): 
+                        continue
+                    slug = m.get('slug', '')
+                    if not slug or slug in seen_slugs: 
                         continue
                         
-                    ev_title = ev.get('title', '')
-                    ev_text = f"{ev_title} {ev.get('slug', '')}".lower()
-                    ev_vol = float(ev.get('volume24hr') or 0)
+                    m_question = m.get('question', '')
+                    full_text = f"{m_question} {slug}".lower()
                     
-                    markets = ev.get('markets', [])
-                    if not isinstance(markets, list):
-                        continue
-                        
-                    for m in markets:
-                        if not isinstance(m, dict):
-                            continue
-                            
-                        slug = m.get('slug')
-                        if not slug or slug in seen_slugs:
-                            continue
-                            
-                        m_question = m.get('question', '')
-                        m_text = f"{m_question} {slug}".lower()
-                        
-                        # 聯合比對：只要 Event 或 Market 其中之一命中關鍵字即可
-                        full_text = f"{ev_text} {m_text}"
-                        if all(term in full_text for term in search_terms):
-                            m_vol = float(m.get('volume24hr') or ev_vol)
-                            
-                            # 優化顯示名稱：組合 Event 標題跟 Market 問題
-                            if ev_title and m_question and ev_title != m_question:
-                                display_name = f"{ev_title} - {m_question}"
-                            else:
-                                display_name = m_question or ev_title
-                                
-                            valid_markets.append({
-                                'slug': slug,
-                                'display_name': display_name,
-                                'vol': m_vol
-                            })
-                            seen_slugs.add(slug)
-                
+                    if all(term in full_text for term in search_terms):
+                        m_vol = float(m.get('volume24hr', 0) or 0)
+                        valid_markets.append({
+                            'slug': slug, 
+                            'display_name': m_question or slug,
+                            'vol': m_vol
+                        })
+                        seen_slugs.add(slug)
+
                 # 依照交易量排序，取前 12 名
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
@@ -542,9 +519,9 @@ with st.sidebar:
                     st.info("沒有找到高度相關的市場，請嘗試更換或縮短關鍵字。 / No markets found.")
                 else:
                     st.success(f"✅ 找到 {len(top_results)} 個市場 / Found {len(top_results)} markets:")
-                    for m in top_results:
-                        st.code(m['slug'])
-                        st.caption(f"📝 {m['display_name']} | 💰 24h Vol: ${m['vol']:,.0f}")
+                    for res in top_results:
+                        st.code(res['slug'])
+                        st.caption(f"📝 {res['display_name']} | 💰 24h Vol: ${res['vol']:,.0f}")
                         
             except Exception as e:
                 st.error(f"連線異常 / Connection Error: {str(e)}")
