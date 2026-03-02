@@ -1,5 +1,8 @@
 \\# 📊 Polymarket Copula \& Tail Sweeper Bot
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg)](https://polymarket-go.streamlit.app/)
+
+> **Live Demo:** [polymarket-go.streamlit.app](https://polymarket-go.streamlit.app/)
 
 
 這是一個基於 Streamlit 的全方位預測市場分析工具，旨在協助使用者識別 Polymarket 上的市場利差（Edge）並自動篩選即將結算的獲利機會。
