@@ -246,21 +246,35 @@ with tab1:
             with st.expander("⚖️ 分析二：YES+NO 一致性驗證 / Analysis 2: YES+NO Parity"):
                 st.markdown("**為什麼要驗證 YES+NO=1？ / Why check parity?**")
                 st.caption("正常市場 YES 價 + NO 價應接近 1。偏差通常反映買賣價差。 / Sum should be ~1. Deviations reflect bid-ask spreads.")
+                import json as _pjson
+                def _parse_yes_no(m):
+                    try:
+                        outcomes = _pjson.loads(m.get('outcomes') or '[]')
+                        prices   = _pjson.loads(m.get('outcomePrices') or '[]')
+                        if outcomes and prices and len(outcomes) == len(prices):
+                            yes_idx = next((i for i, o in enumerate(outcomes) if str(o).lower() == 'yes'), None)
+                            no_idx  = next((i for i, o in enumerate(outcomes) if str(o).lower() == 'no'),  None)
+                            if yes_idx is not None and no_idx is not None:
+                                return float(prices[yes_idx]), float(prices[no_idx])
+                            if len(prices) == 2:
+                                return float(prices[0]), float(prices[1])
+                    except Exception:
+                        pass
+                    ltp = m.get('lastTradePrice') or m.get('last_trade_price')
+                    return (float(ltp), None) if ltp else (None, None)
+
                 parity_results = []
                 for slug in slugs:
                     try:
                         resp = requests.get(f"https://gamma-api.polymarket.com/markets?slug={slug}", timeout=10)
                         data = resp.json()
                         if data:
-                            m = data[0]
-                            yes = m.get('yes_price') or m.get('last_trade_price')
-                            no  = m.get('no_price')
-                            if yes and no:
-                                yes, no = float(yes), float(no)
+                            yes, no = _parse_yes_no(data[0])
+                            if yes is not None and no is not None:
                                 total = yes + no
                                 parity_results.append({'slug': slug, 'yes': yes, 'no': no, 'total': total, 'spread': abs(1 - total)})
-                            elif yes:
-                                parity_results.append({'slug': slug, 'yes': float(yes), 'no': None, 'total': None, 'spread': None})
+                            elif yes is not None:
+                                parity_results.append({'slug': slug, 'yes': yes, 'no': None, 'total': None, 'spread': None})
                     except Exception: pass
                 if parity_results:
                     for r in parity_results:
