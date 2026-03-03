@@ -591,11 +591,12 @@ with st.sidebar:
                     api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
                     st.caption(f"🔎 搜尋詞展開：{api_queries}")
 
-                    # 軌道一：?q= API
+                    # 軌道一：?q= API（markets + events 雙端點）
                     _t1_total = 0
                     _t1_matched = 0
                     for q in api_queries:
                         try:
+                            # 1a. markets 端點
                             url_q = (
                                 f"https://gamma-api.polymarket.com/markets"
                                 f"?q={requests.utils.quote(q)}"
@@ -609,6 +610,25 @@ with st.sidebar:
                                     if _match(m):
                                         _t1_matched += 1
                                         _add(m)
+
+                            # 1b. events 端點：抓 event 下的所有 markets
+                            url_ev = (
+                                f"https://gamma-api.polymarket.com/events"
+                                f"?q={requests.utils.quote(q)}"
+                                f"&active=true&closed=false&limit=50"
+                            )
+                            r_ev = requests.get(url_ev, timeout=10)
+                            if r_ev.ok:
+                                for ev in r_ev.json():
+                                    for m in (ev.get('markets') or []):
+                                        if isinstance(m, dict):
+                                            # event 的 question 補進 market
+                                            if not m.get('question'):
+                                                m['question'] = ev.get('title', '')
+                                            _t1_total += 1
+                                            if _match(m):
+                                                _t1_matched += 1
+                                                _add(m)
                         except Exception as _eq:
                             st.caption(f"軌道一錯誤: {_eq}")
                     st.caption(f"軌道一：API 回傳 {_t1_total} 筆，命中 {_t1_matched} 筆")
