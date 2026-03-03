@@ -578,7 +578,57 @@ with st.sidebar:
                     return sum(_match_term(t, full_text) for t in key_terms)
 
                 with st.spinner("🔍 搜尋中 / Searching..."):
-                    # 軌道一：?q= API 語意搜尋（markets + events 雙端點）
+                    # 軌道一：直接抓 polymarket.com 網站搜尋（與網站搜尋框同一引擎）
+                    _web_slugs = []
+                    try:
+                        _q_encoded = requests.utils.quote(search_keyword)
+                        _web_r = requests.get(
+                            f"https://polymarket.com/search?_q={_q_encoded}",
+                            timeout=15,
+                            headers={"User-Agent": "Mozilla/5.0"}
+                        )
+                        if _web_r.ok:
+                            # 從 HTML 中提取所有 /event/ 和 /markets/ 路徑下的 slug
+                            _slugs_found = re.findall(
+                                r'(?:polymarket\.com/(?:zh/)?(?:event|market)s?/)([\w-]+)',
+                                _web_r.text
+                            )
+                            _web_slugs = list(dict.fromkeys(_slugs_found))  # 去重保序
+                    except Exception:
+                        pass
+
+                    # 用抓到的 slug 去 gamma-api 補齊 question / volume
+                    for _ws in _web_slugs:
+                        try:
+                            _r = requests.get(
+                                f"https://gamma-api.polymarket.com/markets?slug={_ws}&limit=5",
+                                timeout=10
+                            )
+                            if _r.ok:
+                                for m in _r.json():
+                                    s = _score(m)
+                                    _add(m, score=max(s, 1))  # 網站搜尋命中視為至少 1 分
+                        except Exception:
+                            pass
+
+                        # 若是 event slug，抓底下的子市場
+                        try:
+                            _r2 = requests.get(
+                                f"https://gamma-api.polymarket.com/events?slug={_ws}&limit=1",
+                                timeout=10
+                            )
+                            if _r2.ok:
+                                for ev in _r2.json():
+                                    ev_title = ev.get('title', '')
+                                    for m in (ev.get('markets') or []):
+                                        if isinstance(m, dict):
+                                            if not m.get('question'):
+                                                m['question'] = ev_title
+                                            _add(m, extra_text=ev_title, score=2)
+                        except Exception:
+                            pass
+
+                    # 軌道二：gamma-api ?q= 語意搜尋補充
                     for q in key_terms:
                         try:
                             r_m = requests.get(
@@ -605,22 +655,6 @@ with st.sidebar:
                                             if s > 0: _add(m, extra_text=ev_title, score=s)
                         except Exception:
                             pass
-
-                    # 軌道二：本地過濾最新 1600 筆活躍市場
-                    for offset in range(0, 1600, 200):
-                        try:
-                            resp = requests.get(
-                                f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}",
-                                timeout=10
-                            )
-                            if not resp.ok: break
-                            batch = resp.json()
-                            if not batch or not isinstance(batch, list): break
-                            for m in batch:
-                                s = _score(m)
-                                if s > 0: _add(m, score=s)
-                        except Exception:
-                            break
 
                 # 先依命中關鍵詞數排序，同分再依成交量排
                 valid_markets.sort(key=lambda x: (x['score'], x['vol']), reverse=True)
