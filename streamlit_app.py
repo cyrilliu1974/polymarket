@@ -306,7 +306,7 @@ with tab2:
         options=["YES 尾盤(YES Tail)（事件即將發生(Event is about to happen)）", "NO 尾盤(NO Tail)（事件即將未發生(Event is about to not occur)）"],
         horizontal=True
     )
-    is_yes_sweep = (scan_direction == "YES 尾盤（事件即將發生）")
+    is_yes_sweep = (scan_direction == "YES 尾盤(YES Tail)（事件即將發生(Event is about to happen)）")
 
     if is_yes_sweep:
         st.info("""
@@ -357,14 +357,14 @@ with tab2:
                 now = datetime.now(timezone.utc)
                 deadline = now + timedelta(hours=hours_ahead)
                 _raw_markets = []
-                for _offset in range(0, 1000, 200):
+                # 修正：移除提早中止條件，抓取上限提高至 5000 筆
+                for _offset in range(0, 5000, 200):
                     _url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={_offset}"
                     _r = requests.get(_url, timeout=15)
                     if not _r.ok: break
                     _batch = _r.json()
                     if not _batch: break
                     _raw_markets.extend(_batch)
-                    if any((m.get('endDate') or '') > now.strftime('%Y-%m-%d') for m in _batch) and _offset >= 400: break
 
                 def parse_end_date(m):
                     for key in ('endDate', 'end_date', 'umaEndDate'):
@@ -378,12 +378,11 @@ with tab2:
 
                 scan_markets = [m for m in _raw_markets if (d := parse_end_date(m)) and now <= d <= deadline]
 
-                # ── 永遠顯示診斷資訊 ──
+                # ── 診斷資訊 ──
                 st.caption(f"🔍 抓取原始市場數：{len(_raw_markets)} 筆")
                 st.caption(f"⏰ 現在時間（UTC）：{now.strftime('%Y-%m-%dT%H:%M:%SZ')}")
                 st.caption(f"⏰ 截止時間（UTC）：{deadline.strftime('%Y-%m-%dT%H:%M:%SZ')}")
                 st.caption(f"📋 時間過濾後剩餘：{len(scan_markets)} 筆")
-                # 顯示前 5 筆的 endDate，確認抓到的市場結算日分佈
                 if _raw_markets:
                     sample_dates = [(m.get('slug','?'), m.get('endDate','無')) for m in _raw_markets[:5]]
                     for slug_s, ed in sample_dates:
@@ -473,18 +472,18 @@ with st.sidebar:
     if st.button("搜尋市場 / Search", use_container_width=True):
         if keyword.strip():
             search_keyword = keyword.strip()
-            
+
             # 偵測中文並自動翻譯
             if re.search(r'[\u4e00-\u9fff]', search_keyword):
                 try:
                     translated = GoogleTranslator(source='zh-TW', target='en').translate(search_keyword)
                     st.caption(f"🔄 Translated: `{translated}`")
                     search_keyword = translated
-                except: 
+                except:
                     pass
-            
+
             try:
-                # 股票代號對照表：輸入公司名自動展開為市場常用代號
+                # 股票代號對照表
                 TICKER_MAP = {
                     'nvidia': ['nvidia', 'nvda'],
                     'apple':  ['apple', 'aapl'],
@@ -502,7 +501,6 @@ with st.sidebar:
                 raw_terms = search_keyword.lower().split()
                 expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
 
-                # 顯示展開提示
                 hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
                 if hints:
                     st.caption("🔄 股票代號展開：" + "，".join(hints))
@@ -530,7 +528,7 @@ with st.sidebar:
                         })
 
                 with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
-                    # 軌道一：?q= API，每個展開候選各查一次
+                    # 軌道一：?q= API
                     api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
                     for q in api_queries:
                         try:
@@ -563,10 +561,9 @@ with st.sidebar:
                             if _match(m):
                                 _add(m)
 
-                # 依交易量排序，取前 12
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
-                
+
                 if not top_results:
                     st.info("沒有找到高度相關的市場，請嘗試更換或縮短關鍵字。 / No markets found.")
                 else:
@@ -574,7 +571,7 @@ with st.sidebar:
                     for res in top_results:
                         st.code(res['slug'])
                         st.caption(f"📝 {res['display_name']} | 💰 24h Vol: ${res['vol']:,.0f}")
-                        
+
             except Exception as e:
                 st.error(f"連線異常 / Connection Error: {str(e)}")
 
