@@ -162,7 +162,7 @@ with tab1:
                 st.metric("獨立相乘機率(Independent Multiplication Probability) / Independent Prob", f"{p_indep:.4f}", help="Probability if markets are independent / 假設各市場完全獨立時的聯合機率(Assumed joint probability when each market is completely independent)")
             with col2:
                 st.metric("T-Copula 聯合掃全部(T-Copula Joint Sweep All) / Joint Prob (Sweep)", f"{p_sweep:.4f}",
-                          delta=f"{edge:+.4f} ({edge*100:+.2f}%) x{multiplier:.3f} 倍",
+                          delta=f"{edge:+.4f} ({edge*100:+.2f}%) x{multiplier:.3f}倍",
                           delta_color="normal" if edge >= 0 else "inverse",
                           help="Joint probability considering tail correlations / 考慮尾部相關性後的聯合機率(Joint probability after considering tail correlations)")
             with col3:
@@ -171,9 +171,9 @@ with tab1:
 
             st.subheader("📢 自動解讀(Automated Interpretation) / Automated Insight")
             if edge > 0.05:
-                st.success(f"🔥 **強烈正向 Edge / Strong Positive Edge**! (x{multiplier:.1f}). Market underestimates joint occurrence. **Suggest: BUY YES** / 市場低估聯合發生可能(Market underestimates joint occurrence possibility) → 建議買 Yes(Suggest: BUY YES)")
+                st.success(f"🔥 **強烈正向 Edge / Strong Positive Edge**! ({edge*100:+.2f}% x{multiplier:.3f}). Market underestimates joint occurrence. **Suggest: BUY YES** / 市場低估聯合發生可能(Market underestimates joint occurrence possibility) → 建議買 Yes(Suggest: BUY YES)")
             elif edge > 0.02:
-                st.info(f"✅ 有明顯正向 Edge / Noticable Edge (x{multiplier:.1f}). Good for small YES bets to capture tail risk. / 適合小注買 Yes 捕捉尾部相關性(Suitable for small bets on Yes to capture tail correlation)")
+                st.info(f"✅ 有明顯正向 Edge / Noticable Edge ({edge*100:+.2f}% x{multiplier:.3f}). Good for small YES bets to capture tail risk. / 適合小注買 Yes 捕捉尾部相關性(Suitable for small bets on Yes to capture tail correlation)")
             elif edge < -0.02:
                 st.warning(f"⚠️ **負 Edge / Negative Edge**: Copula prob lower than market. Suggest BUY NO or Watch. / Copula 機率較低(Copula probability lower)，建議買 No 或觀望(Suggest buy No or watch)")
             else:
@@ -183,8 +183,7 @@ with tab1:
             # ── 相關性增益視覺化 ──
             st.markdown("**📊 相關性增益圖 / Correlation Gain Visualization**")
             st.caption("顯示獨立機率 vs T-Copula 聯合機率的差距 / Gap between independent vs correlated joint probability")
-            _bar_max = max(p_sweep, p_indep) * 1.15
-            _bar_max = min(_bar_max, 1.0)
+            _bar_max = min(max(p_sweep, p_indep) * 1.15, 1.0)
             col_viz1, col_viz2 = st.columns(2)
             with col_viz1:
                 st.caption(f"獨立機率 / Independent: {p_indep:.4f}")
@@ -224,8 +223,6 @@ with tab1:
 - **實戰啟示(Action) / Action**: YES > 70% 且距結算 > 30 天時需注意(When YES > 70% and distance to settlement > 30 days need attention)。
                 """)
 
-            # 收集有 Yes Bias 的市場，供後續綜合評級使用
-            _bias_slugs = set()
             for _item in yes_bias_debug:
                 _mp_slug, _yes_p, _days = _item
                 if isinstance(_days, str):
@@ -233,29 +230,27 @@ with tab1:
                 elif _days is None:
                     st.caption(f"`{_mp_slug}` — 無法取得日期(Cannot obtain date) / No end date found")
                 elif _yes_p is not None and _yes_p > 0.7 and _days > 30:
-                    _bias_slugs.add(_mp_slug)
-                    # 年化收益率：edge / avg_yes_price * 365 / days_left
                     _avg_yes = sum(float(p)/100 for _, p in market_probs) / len(market_probs) if market_probs else 0.5
                     _annualized = (edge / _avg_yes) * (365 / _days) * 100 if _days > 0 and _avg_yes > 0 else 0
-                    _warn_line1 = f"⚠️ **{_mp_slug}** | YES: {_yes_p:.0%} | Days left: {_days} | 預期年化 Edge: **{_annualized:.1f}%**"
-                    _warn_line2 = "市場可能存在 Yes Bias，建議考慮買 No 或等待更接近結算日再入場。/ Possible Yes Bias, consider NO."
-                    st.warning(_warn_line1 + chr(10)*2 + _warn_line2)
-                elif _yes_p is not None and _yes_p > 0.7:
+                    _bias_l1 = f"⚠️ **{_mp_slug}** | YES: {_yes_p:.0%} | Days left: {_days} | 預期年化 Edge: **{_annualized:.1f}%**"
+                    _bias_l2 = f"市場可能存在 Yes Bias，建議考慮買 No。若選擇仍買 YES，建議搜配 Stop-Loss 指令或分批進場，防範 {_days} 天內突發性反轉。/ If buying YES anyway: use Stop-Loss or scale in gradually."
+                    st.warning(_bias_l1 + chr(10)*2 + _bias_l2)
+                elif _yes_p > 0.7:
                     st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，接近結算(Close to settlement) ({_days}d)，影響較小(Impact smaller)。 / Near settlement, lower bias risk.")
                 else:
                     st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，未達 Bias 門檻(Not reaching Bias threshold)。 / Below Yes Bias threshold.")
 
-            # ── 綜合風險評級 ──
+            # ── 緜合風險評級 ──
+            _bias_slugs = {s for s, p, d in yes_bias_debug if isinstance(d, int) and p is not None and p > 0.7 and d > 30}
             st.divider()
-            st.markdown("**🎯 綜合風險評級 / Composite Risk Rating**")
-            _has_bias = len(_bias_slugs) > 0
-            if edge > 0.02 and _has_bias:
+            st.markdown("**🎯 緜合風險評級 / Composite Risk Rating**")
+            if edge > 0.02 and _bias_slugs:
                 _l1 = f"⚠️ **數學面看多，但籌碼面過熱 / Math bullish, but market overheated**"
                 _l2 = f"T-Copula 顯示 {edge*100:+.2f}% 優勢 (x{multiplier:.3f})，但 {', '.join(_bias_slugs)} 已達高位，隱含回撤風險。"
                 _l3 = "建議：對沖或減少注碼，勿全倉追多。/ Suggest: hedge or reduce position size."
                 st.error(_l1 + chr(10)*2 + _l2 + chr(10) + _l3)
-            elif edge > 0.02 and not _has_bias:
-                st.success(f"✅ **正向 Edge 且無 Yes Bias 疑慮 / Positive edge, no Yes Bias detected** — 訊號較為乾淨，可考慮進場。/ Clean signal, consider entry.")
+            elif edge > 0.02:
+                st.success(f"✅ **正向 Edge 且無 Yes Bias 痑慮 / Positive edge, no Yes Bias** — 訊號較为乾淨，可考慮進場。/ Clean signal, consider entry.")
             elif edge < -0.02:
                 st.warning(f"⚠️ **負 Edge / Negative Edge** — Copula 機率低於市場獨立估計，建議觀望或買 No。/ Watch or consider NO.")
             else:
@@ -276,9 +271,15 @@ with tab1:
                 with c1: st.metric("Edge 點估計(Edge Point Estimate) / Point Est", f"{edge:+.4f}")
                 with c2: st.metric("95% CI 下界(95% CI Lower Bound) / Lower", f"{ci_lower:+.4f}")
                 with c3: st.metric("95% CI 上界(95% CI Upper Bound) / Upper", f"{ci_upper:+.4f}")
-                if ci_lower > 0: st.success("✅ 穩定正向訊號(Stable Positive Signal) / Stable positive signal")
-                elif ci_upper < 0: st.warning("⚠️ 穩定負向訊號(Stable Negative Signal) / Stable negative signal")
-                else: st.info("ℹ️ 可能是模擬誤差(May be simulation error)，建議增加次數(Suggest increase iterations) / Potentially noise, try more iterations")
+                if ci_lower > 0:
+                    st.success("✅ 穩定正向訊號(Stable Positive Signal) / Stable positive signal")
+                    st.info(f"🛡️ 高可靠性訊號 / Signal Reliability: High — CI 下界 {ci_lower:+.4f} 完全在 0 以上，此 Edge 為真實正向訊號，非模擬隨機誤差。")
+                elif ci_upper < 0:
+                    st.warning("⚠️ 穩定負向訊號(Stable Negative Signal) / Stable negative signal")
+                elif ci_lower > -0.005:
+                    st.info(f"🟡 中可靠性訊號 / Signal Reliability: Medium — CI 跨越 0 但偏巭不大 ({ci_lower:+.4f} ~ {ci_upper:+.4f})，可附加模擬次數確認。")
+                else:
+                    st.info("ℹ️ 低可靠性 / Signal Reliability: Low — CI 跨越 0 且偏巭大，建議增加模擬次數或謹慎觀望。 / Potentially noise, try more iterations")
 
             with st.expander("⚖️ 分析二：YES+NO 一致性驗證(Analysis 2: YES+NO Consistency Verification) / Analysis 2: YES+NO Parity"):
                 st.markdown("**為什麼要驗證 YES+NO=1？(Why verify YES+NO=1?) / Why check parity?**")
@@ -343,7 +344,7 @@ with tab2:
         options=["YES 尾盤(YES Tail)（事件即將發生(Event is about to happen)）", "NO 尾盤(NO Tail)（事件即將未發生(Event is about to not occur)）"],
         horizontal=True
     )
-    is_yes_sweep = (scan_direction == "YES 尾盤(YES Tail)（事件即將發生(Event is about to happen)）")
+    is_yes_sweep = (scan_direction == "YES 尾盤（事件即將發生）")
 
     if is_yes_sweep:
         st.info("""
@@ -386,7 +387,7 @@ with tab2:
     min_volume = st.slider(
         "最低 24h 成交量過濾(Min 24h Volume Filter) / Min Volume ($)",
         min_value=0, max_value=50000, value=500, step=500,
-        help="過濾殭屍市場：成交量為 0 的市場通常掛單斷層，看得到吃不到。/ Filter zombie markets with no liquidity."
+        help="過濾殟屍市場：成交量為 0 的市場通常挂單斷層，看得到吃不到。/ Filter zombie markets with no liquidity."
     )
     debug_scanner = st.checkbox("🐛 Debug 模式(Debug Mode) / Debug Mode", value=False)
 
@@ -399,7 +400,6 @@ with tab2:
                 now = datetime.now(timezone.utc)
                 deadline = now + timedelta(hours=hours_ahead)
                 _raw_markets = []
-                # 修正：移除提早中止條件，抓取上限提高至 5000 筆
                 for _offset in range(0, 5000, 200):
                     _url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={_offset}"
                     _r = requests.get(_url, timeout=15)
@@ -420,15 +420,13 @@ with tab2:
 
                 scan_markets = [m for m in _raw_markets if (d := parse_end_date(m)) and now <= d <= deadline]
 
-                # ── 診斷資訊 ──
                 st.caption(f"🔍 抓取原始市場數：{len(_raw_markets)} 筆")
                 st.caption(f"⏰ 現在時間（UTC）：{now.strftime('%Y-%m-%dT%H:%M:%SZ')}")
                 st.caption(f"⏰ 截止時間（UTC）：{deadline.strftime('%Y-%m-%dT%H:%M:%SZ')}")
                 st.caption(f"📋 時間過濾後剩餘：{len(scan_markets)} 筆")
                 if _raw_markets:
-                    sample_dates = [(m.get('slug','?'), m.get('endDate','無')) for m in _raw_markets[:5]]
-                    for slug_s, ed in sample_dates:
-                        st.caption(f"  └ `{slug_s[:40]}` → endDate: `{ed}`")
+                    for slug_s, ed in [(m.get('slug','?'), m.get('endDate','無')) for m in _raw_markets[:5]]:
+                        st.caption(f"  └ {slug_s[:40]} → endDate: {ed}")
 
                 def resolve_yes_price(m):
                     try:
@@ -447,9 +445,8 @@ with tab2:
                     yes_price = resolve_yes_price(m)
                     if yes_price is None:
                         continue
-                    # 成交量過濾
-                    _vol = float(m.get('volume24hr') or m.get('volume') or 0)
-                    if _vol < min_volume:
+                    _vol_c = float(m.get('volume24hr') or m.get('volume') or 0)
+                    if _vol_c < min_volume:
                         continue
                     if is_yes_sweep and yes_price >= price_threshold:
                         candidates.append({**m, '_yes_price_resolved': yes_price})
@@ -479,45 +476,27 @@ with tab2:
                         volume     = m.get('volume') or m.get('volume24hr') or 0
                         profit_pct = (1 - yes_price) * 100 if is_yes_sweep else yes_price * 100
 
-                        # 計算距結算小時數與日均獲利
                         _end_dt_c = parse_end_date(m)
                         _hours_left = max((_end_dt_c - now).total_seconds() / 3600, 0.1) if _end_dt_c else None
                         _daily_yield = (profit_pct / (_hours_left / 24)) if _hours_left else None
 
-                        # 價格區間標籤
                         if is_yes_sweep:
-                            if yes_price >= 0.95:
-                                _label = "✅ 確定性收尾盤"
-                            elif yes_price >= 0.85:
-                                _label = "⚠️ 高收益博弈"
-                            else:
-                                _label = "🔴 投機"
+                            _label = "✅ 確定性收尾盤" if yes_price >= 0.95 else ("⚠️ 高收益博弈" if yes_price >= 0.85 else "🔴 投機")
                         else:
-                            if yes_price <= 0.05:
-                                _label = "✅ 確定性收尾盤"
-                            elif yes_price <= 0.15:
-                                _label = "⚠️ 高收益博弈"
-                            else:
-                                _label = "🔴 投機"
+                            _label = "✅ 確定性收尾盤" if yes_price <= 0.05 else ("⚠️ 高收益博弈" if yes_price <= 0.15 else "🔴 投機")
 
                         cols = st.columns([4, 1, 1, 1, 1])
                         with cols[0]:
                             st.markdown(f"**{question}**")
                             _end_str = str(end_date)[:16] if end_date else 'N/A'
-                            _hours_str = f"{_hours_left:.1f}h" if _hours_left else "?"
-                            st.caption(f"`{slug}` ｜ 結算: {_end_str} (剩 {_hours_str}) ｜ {_label}")
+                            _hrs_str = f"{_hours_left:.1f}h" if _hours_left else "?"
+                            st.caption(f"`{slug}` ｜ 結算: {_end_str} (剩 {_hrs_str}) ｜ {_label}")
                         with cols[1]:
-                            if is_yes_sweep:
-                                st.metric("YES 價格", f"{yes_price:.3f}")
-                            else:
-                                st.metric("NO 價格", f"{no_price:.3f}")
+                            st.metric("YES 價格" if is_yes_sweep else "NO 價格", f"{yes_price:.3f}" if is_yes_sweep else f"{no_price:.3f}")
                         with cols[2]:
                             st.metric("獲利空間", f"{profit_pct:.1f}%")
                         with cols[3]:
-                            if _daily_yield is not None:
-                                st.metric("日均獲利潛力", f"{_daily_yield:.1f}%/d")
-                            else:
-                                st.metric("日均獲利潛力", "N/A")
+                            st.metric("日均獲利潛力", f"{_daily_yield:.1f}%/d" if _daily_yield is not None else "N/A")
                         with cols[4]:
                             try: vol_str = f"${float(volume):,.0f}"
                             except: vol_str = "N/A"
@@ -547,98 +526,59 @@ with st.sidebar:
     if st.button("搜尋市場 / Search", use_container_width=True):
         if keyword.strip():
             search_keyword = keyword.strip()
-
+            
             # 偵測中文並自動翻譯
             if re.search(r'[\u4e00-\u9fff]', search_keyword):
                 try:
                     translated = GoogleTranslator(source='zh-TW', target='en').translate(search_keyword)
                     st.caption(f"🔄 Translated: `{translated}`")
                     search_keyword = translated
-                except:
+                except: 
                     pass
-
+            
             try:
-                # 股票代號對照表
-                TICKER_MAP = {
-                    'nvidia': ['nvidia', 'nvda'],
-                    'apple':  ['apple', 'aapl'],
-                    'microsoft': ['microsoft', 'msft'],
-                    'google': ['google', 'googl', 'alphabet'],
-                    'amazon': ['amazon', 'amzn'],
-                    'tesla':  ['tesla', 'tsla'],
-                    'meta':   ['meta', 'facebook'],
-                    'bitcoin': ['bitcoin', 'btc'],
-                    'ethereum': ['ethereum', 'eth'],
-                    'solana': ['solana', 'sol'],
-                    'ripple': ['ripple', 'xrp'],
-                    'tsmc':   ['tsmc', 'taiwan semiconductor'],
-                }
-                raw_terms = search_keyword.lower().split()
-                expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
-
-                hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
-                if hints:
-                    st.caption("🔄 股票代號展開：" + "，".join(hints))
-
-                def _match(m):
-                    if not isinstance(m, dict):
-                        return False
-                    slug = m.get('slug', '')
-                    if not slug or slug in seen_slugs:
-                        return False
-                    full_text = f"{m.get('question', '')} {slug}".lower()
-                    return all(any(c in full_text for c in candidates) for candidates in expanded)
-
-                seen_slugs = set()
-                valid_markets = []
-
-                def _add(m):
-                    slug = m.get('slug', '')
-                    if slug and slug not in seen_slugs:
-                        seen_slugs.add(slug)
-                        valid_markets.append({
-                            'slug': slug,
-                            'display_name': m.get('question') or slug,
-                            'vol': float(m.get('volume24hr', 0) or 0)
-                        })
-
-                with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
-                    # 軌道一：?q= API
-                    api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
-                    for q in api_queries:
-                        try:
-                            url_q = (
-                                f"https://gamma-api.polymarket.com/markets"
-                                f"?q={requests.utils.quote(q)}"
-                                f"&active=true&closed=false&limit=100"
-                            )
-                            r_q = requests.get(url_q, timeout=10)
-                            if r_q.ok:
-                                for m in r_q.json():
-                                    if _match(m):
-                                        _add(m)
-                        except Exception:
-                            pass
-
-                    # 軌道二：本地過濾最新 1600 筆
+                search_terms = search_keyword.lower().split()
+                all_markets = []
+                
+                # 1. 戳 API 8 次，把全站最新的 1600 個活躍市場抓回記憶體
+                with st.spinner("🚀 深度檢索全站活躍市場中 (約需 2-3 秒) / Deep searching active markets..."):
                     for offset in range(0, 1600, 200):
-                        url_p = (
-                            f"https://gamma-api.polymarket.com/markets"
-                            f"?active=true&closed=false&limit=200&offset={offset}"
-                        )
-                        resp = requests.get(url_p, timeout=10)
-                        if not resp.ok:
+                        url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}"
+                        resp = requests.get(url, timeout=10)
+                        if not resp.ok: 
                             break
                         batch = resp.json()
-                        if not batch or not isinstance(batch, list):
+                        if not batch or not isinstance(batch, list): 
                             break
-                        for m in batch:
-                            if _match(m):
-                                _add(m)
+                        all_markets.extend(batch)
+                
+                valid_markets = []
+                seen_slugs = set()
+                
+                # 2. 用 Python 本地去比對字串
+                for m in all_markets:
+                    if not isinstance(m, dict): 
+                        continue
+                    slug = m.get('slug', '')
+                    if not slug or slug in seen_slugs: 
+                        continue
+                        
+                    m_question = m.get('question', '')
+                    full_text = f"{m_question} {slug}".lower()
+                    
+                    if all(term in full_text for term in search_terms):
+                        m_vol = float(m.get('volume24hr', 0) or 0)
+                        valid_markets.append({
+                            'slug': slug, 
+                            'display_name': m_question or slug,
+                            'vol': m_vol
+                        })
+                        seen_slugs.add(slug)
 
+                # 依照交易量排序，取前 12 名
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
-
+                
                 if not top_results:
                     st.info("沒有找到高度相關的市場，請嘗試更換或縮短關鍵字。 / No markets found.")
                 else:
@@ -646,7 +586,7 @@ with st.sidebar:
                     for res in top_results:
                         st.code(res['slug'])
                         st.caption(f"📝 {res['display_name']} | 💰 24h Vol: ${res['vol']:,.0f}")
-
+                        
             except Exception as e:
                 st.error(f"連線異常 / Connection Error: {str(e)}")
 
