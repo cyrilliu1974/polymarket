@@ -548,6 +548,9 @@ with st.sidebar:
                     'solana': ['solana', 'sol'],
                     'ripple': ['ripple', 'xrp'],
                     'tsmc':   ['tsmc', 'taiwan semiconductor'],
+                    'bubble': ['bubble', 'ai-bubble', 'ai bubble'],
+                    'agi':    ['agi', 'artificial-general', 'achieved-agi'],
+                    'ai':     ['openai', 'deepseek', 'anthropic', 'gemini', 'gpt', 'llm', 'artificial-intelligence', 'ai-bubble', 'top-ai-model'],
                 }
                 raw_terms = search_keyword.lower().split()
                 expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
@@ -582,7 +585,7 @@ with st.sidebar:
                     if not slug or slug in seen_slugs:
                         return False
                     full_text = f"{m.get('question', '')} {slug}".lower()
-                    return all(any(_match_term(c, full_text) for c in candidates) for candidates in expanded)
+                    return all(any(_match_term(c, full_text) for c in _cands) for _cands in expanded)
 
                 with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
                     # 軌道一：?q= API，每個展開候選各查一次
