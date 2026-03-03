@@ -534,66 +534,33 @@ with st.sidebar:
                     pass
 
             try:
-                # 去除虛詞，只保留有意義的關鍵詞
-                STOPWORDS = {
-                    'will','the','a','an','by','in','on','at','to','of','for',
-                    'is','be','are','was','were','has','have','had','do','does',
-                    'or','and','not','any','that','this','it','its','with','from',
-                    'before','after','than','into','about','when','what','how',
-                }
-                all_terms = search_keyword.lower().split()
-                # 有意義的詞（用於比對）
-                key_terms = [t for t in all_terms if t not in STOPWORDS and len(t) > 1]
-                # 若去完後剩 0 個詞，退回全部詞
-                if not key_terms:
-                    key_terms = all_terms
-
-                def _match_term(term, text):
-                    if len(term) <= 3:
-                        return bool(re.search(r'(?<![a-z])' + re.escape(term) + r'(?![a-z])', text))
-                    return term in text
-
                 seen_slugs = set()
                 valid_markets = []
 
-                def _add(m, extra_text='', score=0):
+                def _add(m, display_name=''):
                     slug = m.get('slug', '')
                     if slug and slug not in seen_slugs:
                         seen_slugs.add(slug)
                         valid_markets.append({
                             'slug': slug,
-                            'display_name': m.get('question') or extra_text or slug,
+                            'display_name': m.get('question') or display_name or slug,
                             'vol': float(m.get('volume24hr', 0) or 0),
-                            'score': score,
                         })
 
-                def _score(m, extra_text=''):
-                    """回傳命中的關鍵詞數量（0 = 完全沒命中）"""
-                    if not isinstance(m, dict):
-                        return 0
-                    slug = m.get('slug', '')
-                    if not slug or slug in seen_slugs:
-                        return 0
-                    full_text = f"{m.get('question', '')} {slug} {extra_text}".lower()
-                    return sum(_match_term(t, full_text) for t in key_terms)
-
                 with st.spinner("🔍 搜尋中 / Searching..."):
-                    # 軌道一：直接抓 polymarket.com 網站搜尋（與網站搜尋框同一引擎）
+                    # 軌道一：直接打 polymarket.com 網站搜尋，與瀏覽器搜尋框完全相同
                     _web_slugs = []
                     try:
-                        _q_encoded = requests.utils.quote(search_keyword)
                         _web_r = requests.get(
-                            f"https://polymarket.com/search?_q={_q_encoded}",
+                            f"https://polymarket.com/search?_q={requests.utils.quote(search_keyword)}",
                             timeout=15,
                             headers={"User-Agent": "Mozilla/5.0"}
                         )
                         if _web_r.ok:
-                            # 從 HTML 中提取所有 /event/ 和 /markets/ 路徑下的 slug
-                            _slugs_found = re.findall(
-                                r'(?:polymarket\.com/(?:zh/)?(?:event|market)s?/)([\w-]+)',
+                            _web_slugs = list(dict.fromkeys(re.findall(
+                                r'(?:/(?:zh/)?(?:event|market)s?/)([\w-]+)',
                                 _web_r.text
-                            )
-                            _web_slugs = list(dict.fromkeys(_slugs_found))  # 去重保序
+                            )))
                     except Exception:
                         pass
 
@@ -605,13 +572,10 @@ with st.sidebar:
                                 timeout=10
                             )
                             if _r.ok:
-                                for m in _r.json():
-                                    s = _score(m)
-                                    _add(m, score=max(s, 1))  # 網站搜尋命中視為至少 1 分
+                                for m in _r.json(): _add(m)
                         except Exception:
                             pass
-
-                        # 若是 event slug，抓底下的子市場
+                        # 若是 event slug，抓底下子市場
                         try:
                             _r2 = requests.get(
                                 f"https://gamma-api.polymarket.com/events?slug={_ws}&limit=1",
@@ -622,43 +586,14 @@ with st.sidebar:
                                     ev_title = ev.get('title', '')
                                     for m in (ev.get('markets') or []):
                                         if isinstance(m, dict):
-                                            if not m.get('question'):
-                                                m['question'] = ev_title
-                                            _add(m, extra_text=ev_title, score=2)
+                                            if not m.get('question'): m['question'] = ev_title
+                                            _add(m, display_name=ev_title)
                         except Exception:
                             pass
 
-                    # 軌道二：gamma-api ?q= 語意搜尋補充
-                    for q in key_terms:
-                        try:
-                            r_m = requests.get(
-                                f"https://gamma-api.polymarket.com/markets?q={requests.utils.quote(q)}&active=true&closed=false&limit=100",
-                                timeout=10
-                            )
-                            if r_m.ok:
-                                for m in r_m.json():
-                                    s = _score(m)
-                                    if s > 0: _add(m, score=s)
-
-                            r_ev = requests.get(
-                                f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(q)}&active=true&closed=false&limit=50",
-                                timeout=10
-                            )
-                            if r_ev.ok:
-                                for ev in r_ev.json():
-                                    ev_title = ev.get('title', '')
-                                    for m in (ev.get('markets') or []):
-                                        if isinstance(m, dict):
-                                            if not m.get('question'):
-                                                m['question'] = ev_title
-                                            s = _score(m, extra_text=ev_title)
-                                            if s > 0: _add(m, extra_text=ev_title, score=s)
-                        except Exception:
-                            pass
-
-                # 先依命中關鍵詞數排序，同分再依成交量排
-                valid_markets.sort(key=lambda x: (x['score'], x['vol']), reverse=True)
+                valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
+
 
                 if not top_results:
                     st.warning(f"😶 找不到「{search_keyword}」的相關市場 / No results found")
