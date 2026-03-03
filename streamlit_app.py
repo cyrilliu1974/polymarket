@@ -473,47 +473,35 @@ with st.sidebar:
                     pass
             
             try:
-                from difflib import SequenceMatcher
-
+                # ── 搜尋詞展開：精確詞 + 已知股票代號對照 ──
+                # 只做有限的股票代號對照，不做模糊比對（防止誤判）
+                TICKER_MAP = {
+                    'nvidia': ['nvidia', 'nvda'],
+                    'apple':  ['apple', 'aapl'],
+                    'microsoft': ['microsoft', 'msft'],
+                    'google': ['google', 'googl', 'alphabet'],
+                    'amazon': ['amazon', 'amzn'],
+                    'tesla':  ['tesla', 'tsla'],
+                    'meta':   ['meta', 'facebook'],
+                    'bitcoin': ['bitcoin', 'btc'],
+                    'ethereum': ['ethereum', 'eth'],
+                    'solana': ['solana', 'sol'],
+                    'ripple': ['ripple', 'xrp'],
+                    'tsmc':   ['tsmc', 'taiwan semiconductor'],
+                }
                 raw_terms = search_keyword.lower().split()
+                # 每個詞展開為候選清單（有對照 → 多個候選；沒有 → 只有自己）
+                expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
 
-                def _fuzzy_match_term(term, text, threshold=0.82):
-                    """
-                    模糊比對：term 是否與 text 中的任一單詞相似度 >= threshold。
-                    同時做精確子字串比對（處理縮寫，如 nvda 包含在 slug 中）。
-                    threshold=0.82 實測可命中：
-                      nvidia  ↔ nvda   (0.67 → 不命中，但 nvda 包含在 text 中)
-                      bitcoin ↔ btc    (不命中縮寫，但精確比對命中)
-                    對於縮寫問題，改用「term 是 text 單詞的前綴或縮寫」額外判斷。
-                    """
-                    # 1. 精確子字串（含縮寫）
-                    if term in text:
-                        return True
-                    # 2. text 拆成單詞逐一做相似度比對
-                    words = re.split(r'[-_\s]+', text)
-                    for w in words:
-                        if not w:
-                            continue
-                        ratio = SequenceMatcher(None, term, w).ratio()
-                        if ratio >= threshold:
-                            return True
-                        # 3. 縮寫判斷：term 是 w 的前 N 個字母組合
-                        #    例：nvidia → nvda 不像，但 nvda 是 nvidia 的縮寫
-                        #    反過來：w(nvda) 的每個字母都出現在 term(nvidia) 的對應位置
-                        if len(w) >= 2 and len(term) >= len(w):
-                            if all(c in term for c in w):
-                                return True
-                    return False
-
-                def _match_fuzzy(m):
-                    """每個搜尋詞都必須在 question 或 slug 中模糊命中"""
+                def _match(m):
+                    """每個搜尋詞，只要其中一個候選出現在 full_text 就算命中"""
                     if not isinstance(m, dict):
                         return False
                     slug = m.get('slug', '')
                     if not slug or slug in seen_slugs:
                         return False
                     full_text = f"{m.get('question', '')} {slug}".lower()
-                    return all(_fuzzy_match_term(t, full_text) for t in raw_terms)
+                    return all(any(c in full_text for c in candidates) for candidates in expanded)
 
                 seen_slugs = set()
                 valid_markets = []
@@ -528,23 +516,30 @@ with st.sidebar:
                             'vol': float(m.get('volume24hr', 0) or 0)
                         })
 
-                with st.spinner("🚀 雙軌模糊搜尋中 / Dual-track fuzzy searching..."):
-                    # ── 軌道一：?q= API 查詢（速度快，補足索引內的市場）──
-                    try:
-                        url_q = (
-                            f"https://gamma-api.polymarket.com/markets"
-                            f"?q={requests.utils.quote(search_keyword)}"
-                            f"&active=true&closed=false&limit=100"
-                        )
-                        r_q = requests.get(url_q, timeout=10)
-                        if r_q.ok:
-                            for m in r_q.json():
-                                if _match_fuzzy(m):
-                                    _add(m)
-                    except Exception:
-                        pass
+                # 顯示展開提示
+                hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
+                if hints:
+                    st.caption("🔄 股票代號展開：" + "，".join(hints))
 
-                    # ── 軌道二：本地模糊過濾最新 1600 筆市場 ──
+                with st.spinner("🚀 雙軌搜尋中 / Searching..."):
+                    # ── 軌道一：?q= API，每個展開候選各查一次 ──
+                    api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
+                    for q in api_queries:
+                        try:
+                            url_q = (
+                                f"https://gamma-api.polymarket.com/markets"
+                                f"?q={requests.utils.quote(q)}"
+                                f"&active=true&closed=false&limit=100"
+                            )
+                            r_q = requests.get(url_q, timeout=10)
+                            if r_q.ok:
+                                for m in r_q.json():
+                                    if _match(m):
+                                        _add(m)
+                        except Exception:
+                            pass
+
+                    # ── 軌道二：本地過濾最新 1600 筆 ──
                     for offset in range(0, 1600, 200):
                         url_p = (
                             f"https://gamma-api.polymarket.com/markets"
@@ -557,7 +552,7 @@ with st.sidebar:
                         if not batch or not isinstance(batch, list):
                             break
                         for m in batch:
-                            if _match_fuzzy(m):
+                            if _match(m):
                                 _add(m)
 
                 # 依交易量排序，取前 12
