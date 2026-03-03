@@ -534,7 +534,19 @@ with st.sidebar:
                     pass
 
             try:
-                search_terms = search_keyword.lower().split()
+                # 去除虛詞，只保留有意義的關鍵詞
+                STOPWORDS = {
+                    'will','the','a','an','by','in','on','at','to','of','for',
+                    'is','be','are','was','were','has','have','had','do','does',
+                    'or','and','not','any','that','this','it','its','with','from',
+                    'before','after','than','into','about','when','what','how',
+                }
+                all_terms = search_keyword.lower().split()
+                # 有意義的詞（用於比對）
+                key_terms = [t for t in all_terms if t not in STOPWORDS and len(t) > 1]
+                # 若去完後剩 0 個詞，退回全部詞
+                if not key_terms:
+                    key_terms = all_terms
 
                 def _match_term(term, text):
                     if len(term) <= 3:
@@ -544,28 +556,30 @@ with st.sidebar:
                 seen_slugs = set()
                 valid_markets = []
 
-                def _add(m, extra_text=''):
+                def _add(m, extra_text='', score=0):
                     slug = m.get('slug', '')
                     if slug and slug not in seen_slugs:
                         seen_slugs.add(slug)
                         valid_markets.append({
                             'slug': slug,
                             'display_name': m.get('question') or extra_text or slug,
-                            'vol': float(m.get('volume24hr', 0) or 0)
+                            'vol': float(m.get('volume24hr', 0) or 0),
+                            'score': score,
                         })
 
-                def _match(m, extra_text=''):
+                def _score(m, extra_text=''):
+                    """回傳命中的關鍵詞數量（0 = 完全沒命中）"""
                     if not isinstance(m, dict):
-                        return False
+                        return 0
                     slug = m.get('slug', '')
                     if not slug or slug in seen_slugs:
-                        return False
+                        return 0
                     full_text = f"{m.get('question', '')} {slug} {extra_text}".lower()
-                    return all(_match_term(t, full_text) for t in search_terms)
+                    return sum(_match_term(t, full_text) for t in key_terms)
 
                 with st.spinner("🔍 搜尋中 / Searching..."):
                     # 軌道一：?q= API 語意搜尋（markets + events 雙端點）
-                    for q in search_terms:
+                    for q in key_terms:
                         try:
                             r_m = requests.get(
                                 f"https://gamma-api.polymarket.com/markets?q={requests.utils.quote(q)}&active=true&closed=false&limit=100",
@@ -573,7 +587,8 @@ with st.sidebar:
                             )
                             if r_m.ok:
                                 for m in r_m.json():
-                                    if _match(m): _add(m)
+                                    s = _score(m)
+                                    if s > 0: _add(m, score=s)
 
                             r_ev = requests.get(
                                 f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(q)}&active=true&closed=false&limit=50",
@@ -586,7 +601,8 @@ with st.sidebar:
                                         if isinstance(m, dict):
                                             if not m.get('question'):
                                                 m['question'] = ev_title
-                                            if _match(m, extra_text=ev_title): _add(m)
+                                            s = _score(m, extra_text=ev_title)
+                                            if s > 0: _add(m, extra_text=ev_title, score=s)
                         except Exception:
                             pass
 
@@ -601,11 +617,13 @@ with st.sidebar:
                             batch = resp.json()
                             if not batch or not isinstance(batch, list): break
                             for m in batch:
-                                if _match(m): _add(m)
+                                s = _score(m)
+                                if s > 0: _add(m, score=s)
                         except Exception:
                             break
 
-                valid_markets.sort(key=lambda x: x['vol'], reverse=True)
+                # 先依命中關鍵詞數排序，同分再依成交量排
+                valid_markets.sort(key=lambda x: (x['score'], x['vol']), reverse=True)
                 top_results = valid_markets[:12]
 
                 if not top_results:
