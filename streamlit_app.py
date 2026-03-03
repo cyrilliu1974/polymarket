@@ -548,48 +548,54 @@ with st.sidebar:
                         })
 
                 with st.spinner("🔍 搜尋中 / Searching..."):
-                    # 軌道一：直接打 polymarket.com 網站搜尋，與瀏覽器搜尋框完全相同
-                    _web_slugs = []
-                    try:
-                        _web_r = requests.get(
-                            f"https://polymarket.com/search?_q={requests.utils.quote(search_keyword)}",
-                            timeout=15,
-                            headers={"User-Agent": "Mozilla/5.0"}
-                        )
-                        if _web_r.ok:
-                            _web_slugs = list(dict.fromkeys(re.findall(
-                                r'(?:/(?:zh/)?(?:event|market)s?/)([\w-]+)',
-                                _web_r.text
-                            )))
-                    except Exception:
-                        pass
+                    search_terms = search_keyword.lower().split()
 
-                    # 用抓到的 slug 去 gamma-api 補齊 question / volume
-                    for _ws in _web_slugs:
+                    def _match(m):
+                        if not isinstance(m, dict): return False
+                        slug = m.get('slug', '')
+                        if not slug or slug in seen_slugs: return False
+                        full_text = f"{m.get('question', '')} {slug}".lower()
+                        return all(t in full_text for t in search_terms)
+
+                    # 軌道一：?q= API（markets + events 雙端點）
+                    for q in search_terms:
                         try:
-                            _r = requests.get(
-                                f"https://gamma-api.polymarket.com/markets?slug={_ws}&limit=5",
+                            r_m = requests.get(
+                                f"https://gamma-api.polymarket.com/markets?q={requests.utils.quote(q)}&active=true&closed=false&limit=100",
                                 timeout=10
                             )
-                            if _r.ok:
-                                for m in _r.json(): _add(m)
-                        except Exception:
-                            pass
-                        # 若是 event slug，抓底下子市場
-                        try:
-                            _r2 = requests.get(
-                                f"https://gamma-api.polymarket.com/events?slug={_ws}&limit=1",
+                            if r_m.ok:
+                                for m in r_m.json():
+                                    if _match(m): _add(m)
+                            r_ev = requests.get(
+                                f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(q)}&active=true&closed=false&limit=50",
                                 timeout=10
                             )
-                            if _r2.ok:
-                                for ev in _r2.json():
+                            if r_ev.ok:
+                                for ev in r_ev.json():
                                     ev_title = ev.get('title', '')
                                     for m in (ev.get('markets') or []):
                                         if isinstance(m, dict):
                                             if not m.get('question'): m['question'] = ev_title
-                                            _add(m, display_name=ev_title)
+                                            if _match(m): _add(m, display_name=ev_title)
                         except Exception:
                             pass
+
+                    # 軌道二：本地過濾最新 1600 筆活躍市場
+                    for offset in range(0, 1600, 200):
+                        try:
+                            resp = requests.get(
+                                f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}",
+                                timeout=10
+                            )
+                            if not resp.ok: break
+                            batch = resp.json()
+                            if not batch or not isinstance(batch, list): break
+                            for m in batch:
+                                if _match(m): _add(m)
+                        except Exception:
+                            break
+
 
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
