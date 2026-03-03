@@ -566,7 +566,13 @@ with st.sidebar:
                     m_question = m.get('question', '')
                     full_text = f"{m_question} {slug}".lower()
                     
-                    if all(term in full_text for term in search_terms):
+        
+                    def _match_term(term, text):
+                        if len(term) <= 3:
+                            return bool(re.search(r'(?<![a-z])' + re.escape(term) + r'(?![a-z])', text))
+                        return term in text
+
+                    if all(_match_term(term, full_text) for term in search_terms):
                         m_vol = float(m.get('volume24hr', 0) or 0)
                         valid_markets.append({
                             'slug': slug, 
