@@ -378,6 +378,17 @@ with tab2:
 
                 scan_markets = [m for m in _raw_markets if (d := parse_end_date(m)) and now <= d <= deadline]
 
+                # ── 永遠顯示診斷資訊 ──
+                st.caption(f"🔍 抓取原始市場數：{len(_raw_markets)} 筆")
+                st.caption(f"⏰ 現在時間（UTC）：{now.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+                st.caption(f"⏰ 截止時間（UTC）：{deadline.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+                st.caption(f"📋 時間過濾後剩餘：{len(scan_markets)} 筆")
+                # 顯示前 5 筆的 endDate，確認抓到的市場結算日分佈
+                if _raw_markets:
+                    sample_dates = [(m.get('slug','?'), m.get('endDate','無')) for m in _raw_markets[:5]]
+                    for slug_s, ed in sample_dates:
+                        st.caption(f"  └ `{slug_s[:40]}` → endDate: `{ed}`")
+
                 def resolve_yes_price(m):
                     try:
                         outcomes = _json.loads(m.get('outcomes') or '[]')
@@ -473,8 +484,7 @@ with st.sidebar:
                     pass
             
             try:
-                # ── 搜尋詞展開：精確詞 + 已知股票代號對照 ──
-                # 只做有限的股票代號對照，不做模糊比對（防止誤判）
+                # 股票代號對照表：輸入公司名自動展開為市場常用代號
                 TICKER_MAP = {
                     'nvidia': ['nvidia', 'nvda'],
                     'apple':  ['apple', 'aapl'],
@@ -490,11 +500,14 @@ with st.sidebar:
                     'tsmc':   ['tsmc', 'taiwan semiconductor'],
                 }
                 raw_terms = search_keyword.lower().split()
-                # 每個詞展開為候選清單（有對照 → 多個候選；沒有 → 只有自己）
                 expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
 
+                # 顯示展開提示
+                hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
+                if hints:
+                    st.caption("🔄 股票代號展開：" + "，".join(hints))
+
                 def _match(m):
-                    """每個搜尋詞，只要其中一個候選出現在 full_text 就算命中"""
                     if not isinstance(m, dict):
                         return False
                     slug = m.get('slug', '')
@@ -516,13 +529,8 @@ with st.sidebar:
                             'vol': float(m.get('volume24hr', 0) or 0)
                         })
 
-                # 顯示展開提示
-                hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
-                if hints:
-                    st.caption("🔄 股票代號展開：" + "，".join(hints))
-
-                with st.spinner("🚀 雙軌搜尋中 / Searching..."):
-                    # ── 軌道一：?q= API，每個展開候選各查一次 ──
+                with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
+                    # 軌道一：?q= API，每個展開候選各查一次
                     api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
                     for q in api_queries:
                         try:
@@ -539,7 +547,7 @@ with st.sidebar:
                         except Exception:
                             pass
 
-                    # ── 軌道二：本地過濾最新 1600 筆 ──
+                    # 軌道二：本地過濾最新 1600 筆
                     for offset in range(0, 1600, 200):
                         url_p = (
                             f"https://gamma-api.polymarket.com/markets"
