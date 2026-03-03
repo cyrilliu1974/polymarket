@@ -474,44 +474,69 @@ with st.sidebar:
             
             try:
                 search_terms = search_keyword.lower().split()
-                all_markets = []
-                
-                # 1. 戳 API 8 次，把全站最新的 1600 個活躍市場抓回記憶體
-                with st.spinner("🚀 深度檢索全站活躍市場中 (約需 2-3 秒) / Deep searching active markets..."):
+                seen_slugs = set()
+                valid_markets = []
+
+                def _match(m):
+                    """所有關鍵字都必須出現在 question 或 slug 中"""
+                    if not isinstance(m, dict):
+                        return False
+                    slug = m.get('slug', '')
+                    if not slug or slug in seen_slugs:
+                        return False
+                    full_text = f"{m.get('question', '')} {slug}".lower()
+                    return all(term in full_text for term in search_terms)
+
+                def _add(m):
+                    slug = m.get('slug', '')
+                    if slug and slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        valid_markets.append({
+                            'slug': slug,
+                            'display_name': m.get('question') or slug,
+                            'vol': float(m.get('volume24hr', 0) or 0)
+                        })
+
+                with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
+                    # ── 軌道一：?q= API 查詢 ──
+                    # 只查兩個變體：完整關鍵字 + 第一個單詞
+                    # 第一個單詞通常是最具識別性的（如 nvidia、bitcoin、trump）
+                    # 不拆分每個單詞，避免 stock、price 這類通用詞撈回大量無關市場
+                    first_word = search_terms[0] if search_terms else search_keyword
+                    q_variants = list(dict.fromkeys([search_keyword, first_word]))
+                    for q in q_variants:
+                        try:
+                            url_q = (
+                                f"https://gamma-api.polymarket.com/markets"
+                                f"?q={requests.utils.quote(q)}"
+                                f"&active=true&closed=false&limit=100"
+                            )
+                            r_q = requests.get(url_q, timeout=10)
+                            if r_q.ok:
+                                for m in r_q.json():
+                                    if _match(m):
+                                        _add(m)
+                        except Exception:
+                            pass
+
+                    # ── 軌道二：本地過濾最新 1600 筆市場 ──
+                    # 補足 API 索引未涵蓋的市場
                     for offset in range(0, 1600, 200):
-                        url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}"
-                        resp = requests.get(url, timeout=10)
-                        if not resp.ok: 
+                        url_p = (
+                            f"https://gamma-api.polymarket.com/markets"
+                            f"?active=true&closed=false&limit=200&offset={offset}"
+                        )
+                        resp = requests.get(url_p, timeout=10)
+                        if not resp.ok:
                             break
                         batch = resp.json()
-                        if not batch or not isinstance(batch, list): 
+                        if not batch or not isinstance(batch, list):
                             break
-                        all_markets.extend(batch)
-                
-                valid_markets = []
-                seen_slugs = set()
-                
-                # 2. 用 Python 本地去比對字串
-                for m in all_markets:
-                    if not isinstance(m, dict): 
-                        continue
-                    slug = m.get('slug', '')
-                    if not slug or slug in seen_slugs: 
-                        continue
-                        
-                    m_question = m.get('question', '')
-                    full_text = f"{m_question} {slug}".lower()
-                    
-                    if all(term in full_text for term in search_terms):
-                        m_vol = float(m.get('volume24hr', 0) or 0)
-                        valid_markets.append({
-                            'slug': slug, 
-                            'display_name': m_question or slug,
-                            'vol': m_vol
-                        })
-                        seen_slugs.add(slug)
+                        for m in batch:
+                            if _match(m):
+                                _add(m)
 
-                # 依照交易量排序，取前 12 名
+                # 依交易量排序，取前 12
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
                 
