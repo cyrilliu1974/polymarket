@@ -588,8 +588,12 @@ with st.sidebar:
                     return all(any(_match_term(c, full_text) for c in _cands) for _cands in expanded)
 
                 with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
-                    # 軌道一：?q= API，每個展開候選各查一次
                     api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
+                    st.caption(f"🔎 搜尋詞展開：{api_queries}")
+
+                    # 軌道一：?q= API
+                    _t1_total = 0
+                    _t1_matched = 0
                     for q in api_queries:
                         try:
                             url_q = (
@@ -599,13 +603,19 @@ with st.sidebar:
                             )
                             r_q = requests.get(url_q, timeout=10)
                             if r_q.ok:
-                                for m in r_q.json():
+                                _batch_q = r_q.json()
+                                _t1_total += len(_batch_q)
+                                for m in _batch_q:
                                     if _match(m):
+                                        _t1_matched += 1
                                         _add(m)
-                        except Exception:
-                            pass
+                        except Exception as _eq:
+                            st.caption(f"軌道一錯誤: {_eq}")
+                    st.caption(f"軌道一：API 回傳 {_t1_total} 筆，命中 {_t1_matched} 筆")
 
                     # 軌道二：本地過濾最新 1600 筆
+                    _t2_total = 0
+                    _t2_matched = 0
                     for offset in range(0, 1600, 200):
                         url_p = (
                             f"https://gamma-api.polymarket.com/markets"
@@ -617,9 +627,12 @@ with st.sidebar:
                         batch = resp.json()
                         if not batch or not isinstance(batch, list):
                             break
+                        _t2_total += len(batch)
                         for m in batch:
                             if _match(m):
+                                _t2_matched += 1
                                 _add(m)
+                    st.caption(f"軌道二：掃描 {_t2_total} 筆，命中 {_t2_matched} 筆")
 
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
