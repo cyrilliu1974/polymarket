@@ -162,7 +162,7 @@ with tab1:
                 st.metric("獨立相乘機率(Independent Multiplication Probability) / Independent Prob", f"{p_indep:.4f}", help="Probability if markets are independent / 假設各市場完全獨立時的聯合機率(Assumed joint probability when each market is completely independent)")
             with col2:
                 st.metric("T-Copula 聯合掃全部(T-Copula Joint Sweep All) / Joint Prob (Sweep)", f"{p_sweep:.4f}",
-                          delta=f"{edge:+.4f} Edge",
+                          delta=f"{edge:+.4f} ({edge*100:+.2f}%) x{multiplier:.3f} 倍",
                           delta_color="normal" if edge >= 0 else "inverse",
                           help="Joint probability considering tail correlations / 考慮尾部相關性後的聯合機率(Joint probability after considering tail correlations)")
             with col3:
@@ -179,6 +179,19 @@ with tab1:
             else:
                 st.info("No significant edge. Market price aligns with simulation. / 市場定價接近模擬(Market pricing close to simulation)，建議觀望(Suggest watch)")
             st.caption(f"Simulations: {num_sim:,} | Copula: T (df=4) | Corr: {effective_corr}")
+
+            # ── 相關性增益視覺化 ──
+            st.markdown("**📊 相關性增益圖 / Correlation Gain Visualization**")
+            st.caption("顯示獨立機率 vs T-Copula 聯合機率的差距 / Gap between independent vs correlated joint probability")
+            _bar_max = max(p_sweep, p_indep) * 1.15
+            _bar_max = min(_bar_max, 1.0)
+            col_viz1, col_viz2 = st.columns(2)
+            with col_viz1:
+                st.caption(f"獨立機率 / Independent: {p_indep:.4f}")
+                st.progress(min(p_indep / _bar_max, 1.0))
+            with col_viz2:
+                st.caption(f"T-Copula 聯合機率 / Joint: {p_sweep:.4f}  {'▲' if edge >= 0 else '▼'} {abs(edge)*100:.2f}%")
+                st.progress(min(p_sweep / _bar_max, 1.0))
 
             # ── Yes Bias 偵測(Yes Bias Detection) / Yes Bias Detection ──
             yes_bias_debug = []
@@ -211,18 +224,42 @@ with tab1:
 - **實戰啟示(Action) / Action**: YES > 70% 且距結算 > 30 天時需注意(When YES > 70% and distance to settlement > 30 days need attention)。
                 """)
 
+            # 收集有 Yes Bias 的市場，供後續綜合評級使用
+            _bias_slugs = set()
             for _item in yes_bias_debug:
                 _mp_slug, _yes_p, _days = _item
                 if isinstance(_days, str):
                     st.caption(f"`{_mp_slug}` — {_days}")
                 elif _days is None:
                     st.caption(f"`{_mp_slug}` — 無法取得日期(Cannot obtain date) / No end date found")
-                elif _yes_p > 0.7 and _days > 30:
-                    st.warning(f"⚠️ {_mp_slug} | YES: {_yes_p:.0%} | Days left: {_days} \n\n 市場可能存在 Yes Bias(Market may exist Yes Bias)，建議考慮買 No。(Suggest consider buy NO) / Possible Yes Bias, consider NO.")
-                elif _yes_p > 0.7:
+                elif _yes_p is not None and _yes_p > 0.7 and _days > 30:
+                    _bias_slugs.add(_mp_slug)
+                    # 年化收益率：edge / avg_yes_price * 365 / days_left
+                    _avg_yes = sum(float(p)/100 for _, p in market_probs) / len(market_probs) if market_probs else 0.5
+                    _annualized = (edge / _avg_yes) * (365 / _days) * 100 if _days > 0 and _avg_yes > 0 else 0
+                    _warn_line1 = f"⚠️ **{_mp_slug}** | YES: {_yes_p:.0%} | Days left: {_days} | 預期年化 Edge: **{_annualized:.1f}%**"
+                    _warn_line2 = "市場可能存在 Yes Bias，建議考慮買 No 或等待更接近結算日再入場。/ Possible Yes Bias, consider NO."
+                    st.warning(_warn_line1 + chr(10)*2 + _warn_line2)
+                elif _yes_p is not None and _yes_p > 0.7:
                     st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，接近結算(Close to settlement) ({_days}d)，影響較小(Impact smaller)。 / Near settlement, lower bias risk.")
                 else:
                     st.info(f"✅ `{_mp_slug}` — YES {_yes_p:.0%}，未達 Bias 門檻(Not reaching Bias threshold)。 / Below Yes Bias threshold.")
+
+            # ── 綜合風險評級 ──
+            st.divider()
+            st.markdown("**🎯 綜合風險評級 / Composite Risk Rating**")
+            _has_bias = len(_bias_slugs) > 0
+            if edge > 0.02 and _has_bias:
+                _l1 = f"⚠️ **數學面看多，但籌碼面過熱 / Math bullish, but market overheated**"
+                _l2 = f"T-Copula 顯示 {edge*100:+.2f}% 優勢 (x{multiplier:.3f})，但 {', '.join(_bias_slugs)} 已達高位，隱含回撤風險。"
+                _l3 = "建議：對沖或減少注碼，勿全倉追多。/ Suggest: hedge or reduce position size."
+                st.error(_l1 + chr(10)*2 + _l2 + chr(10) + _l3)
+            elif edge > 0.02 and not _has_bias:
+                st.success(f"✅ **正向 Edge 且無 Yes Bias 疑慮 / Positive edge, no Yes Bias detected** — 訊號較為乾淨，可考慮進場。/ Clean signal, consider entry.")
+            elif edge < -0.02:
+                st.warning(f"⚠️ **負 Edge / Negative Edge** — Copula 機率低於市場獨立估計，建議觀望或買 No。/ Watch or consider NO.")
+            else:
+                st.info("ℹ️ Edge 不顯著，市場定價合理，建議觀望。/ Edge not significant, market fairly priced.")
 
             st.divider()
             st.subheader("🔬 進階分析(Advanced Analysis) / Advanced Analysis")
@@ -346,6 +383,11 @@ with tab2:
                 help="設 0.05 代表只找 YES < 5% 的市場(Set 0.05 means only look for YES < 5% markets)，也就是 NO > 95% 的市場(that is NO > 95% markets)"
             )
     scanner_limit = st.slider("顯示數量(Display Quantity) / Results Limit", min_value=5, max_value=50, value=20, step=5)
+    min_volume = st.slider(
+        "最低 24h 成交量過濾(Min 24h Volume Filter) / Min Volume ($)",
+        min_value=0, max_value=50000, value=500, step=500,
+        help="過濾殭屍市場：成交量為 0 的市場通常掛單斷層，看得到吃不到。/ Filter zombie markets with no liquidity."
+    )
     debug_scanner = st.checkbox("🐛 Debug 模式(Debug Mode) / Debug Mode", value=False)
 
     st.divider()
@@ -405,6 +447,10 @@ with tab2:
                     yes_price = resolve_yes_price(m)
                     if yes_price is None:
                         continue
+                    # 成交量過濾
+                    _vol = float(m.get('volume24hr') or m.get('volume') or 0)
+                    if _vol < min_volume:
+                        continue
                     if is_yes_sweep and yes_price >= price_threshold:
                         candidates.append({**m, '_yes_price_resolved': yes_price})
                     elif not is_yes_sweep and yes_price <= price_threshold:
@@ -425,28 +471,57 @@ with tab2:
                         st.success(f"找到 {len(candidates)} 個 NO 尾盤候選(Found {len(candidates)} NO Tail Candidates)")
                         st.caption("以下市場(The following markets) YES 極低(YES extremely low)（事件幾乎不會發生(event almost will not occur)），即將結算(about to settle)。買入 NO 等待事件未發生即可收回 $1。(Buy NO wait for event not occur to recover $1)。")
                     for m in candidates:
-                        yes_price = m.get('_yes_price_resolved', 0)
-                        no_price  = 1 - yes_price
-                        question  = m.get('question', m.get('slug', ''))
-                        slug      = m.get('slug', '')
-                        end_date  = m.get('endDateIso') or m.get('endDate') or '未知(Unknown)'
-                        volume    = m.get('volume') or m.get('volume24hr') or 0
+                        yes_price  = m.get('_yes_price_resolved', 0)
+                        no_price   = 1 - yes_price
+                        question   = m.get('question', m.get('slug', ''))
+                        slug       = m.get('slug', '')
+                        end_date   = m.get('endDateIso') or m.get('endDate') or ''
+                        volume     = m.get('volume') or m.get('volume24hr') or 0
                         profit_pct = (1 - yes_price) * 100 if is_yes_sweep else yes_price * 100
-                        cols = st.columns([4, 1, 1, 1])
+
+                        # 計算距結算小時數與日均獲利
+                        _end_dt_c = parse_end_date(m)
+                        _hours_left = max((_end_dt_c - now).total_seconds() / 3600, 0.1) if _end_dt_c else None
+                        _daily_yield = (profit_pct / (_hours_left / 24)) if _hours_left else None
+
+                        # 價格區間標籤
+                        if is_yes_sweep:
+                            if yes_price >= 0.95:
+                                _label = "✅ 確定性收尾盤"
+                            elif yes_price >= 0.85:
+                                _label = "⚠️ 高收益博弈"
+                            else:
+                                _label = "🔴 投機"
+                        else:
+                            if yes_price <= 0.05:
+                                _label = "✅ 確定性收尾盤"
+                            elif yes_price <= 0.15:
+                                _label = "⚠️ 高收益博弈"
+                            else:
+                                _label = "🔴 投機"
+
+                        cols = st.columns([4, 1, 1, 1, 1])
                         with cols[0]:
                             st.markdown(f"**{question}**")
-                            st.caption(f"`{slug}` ｜ 結算(Settlement): {str(end_date)[:16]}")
+                            _end_str = str(end_date)[:16] if end_date else 'N/A'
+                            _hours_str = f"{_hours_left:.1f}h" if _hours_left else "?"
+                            st.caption(f"`{slug}` ｜ 結算: {_end_str} (剩 {_hours_str}) ｜ {_label}")
                         with cols[1]:
                             if is_yes_sweep:
-                                st.metric("YES 價格(YES Price)", f"{yes_price:.3f}")
+                                st.metric("YES 價格", f"{yes_price:.3f}")
                             else:
-                                st.metric("NO 價格(NO Price)", f"{no_price:.3f}")
+                                st.metric("NO 價格", f"{no_price:.3f}")
                         with cols[2]:
-                            st.metric("剩餘獲利空間(Remaining Profit Space)", f"{profit_pct:.1f}%")
+                            st.metric("獲利空間", f"{profit_pct:.1f}%")
                         with cols[3]:
+                            if _daily_yield is not None:
+                                st.metric("日均獲利潛力", f"{_daily_yield:.1f}%/d")
+                            else:
+                                st.metric("日均獲利潛力", "N/A")
+                        with cols[4]:
                             try: vol_str = f"${float(volume):,.0f}"
                             except: vol_str = "N/A"
-                            st.metric("交易量(Trading Volume)", vol_str)
+                            st.metric("24h 成交量", vol_str)
                         st.divider()
             except Exception as e:
                 st.error(f"掃描失敗(Scan Failed) / Scan Failed: {e}")
