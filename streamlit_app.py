@@ -631,6 +631,23 @@ with st.sidebar:
                                                 _add(m)
                         except Exception as _eq:
                             st.caption(f"軌道一錯誤: {_eq}")
+
+                    # 診斷：直接打 events?q=bubble 看回傳
+                    try:
+                        _diag = requests.get(
+                            f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(raw_terms[0])}&active=true&closed=false&limit=5",
+                            timeout=10
+                        )
+                        if _diag.ok:
+                            _devs = _diag.json()
+                            st.caption(f"🔬 events API 回傳 {len(_devs)} 筆")
+                            for _ev in _devs[:3]:
+                                st.caption(f"  event title: {_ev.get('title','')} | slug: {_ev.get('slug','')}")
+                                for _sm in (_ev.get('markets') or [])[:2]:
+                                    st.caption(f"    market slug: {_sm.get('slug','')} | question: {_sm.get('question','')[:60]}")
+                    except Exception as _de:
+                        st.caption(f"診斷錯誤: {_de}")
+
                     st.caption(f"軌道一：API 回傳 {_t1_total} 筆，命中 {_t1_matched} 筆")
 
                     # 軌道二：本地過濾最新 1600 筆
