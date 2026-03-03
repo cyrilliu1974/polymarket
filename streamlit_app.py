@@ -550,12 +550,17 @@ with st.sidebar:
                 with st.spinner("🔍 搜尋中 / Searching..."):
                     search_terms = search_keyword.lower().split()
 
-                    def _match(m):
+                    def _match_term(term, text):
+                        if len(term) <= 3:
+                            return bool(re.search(r'(?<![a-z])' + re.escape(term) + r'(?![a-z])', text))
+                        return term in text
+
+                    def _match(m, extra_text=''):
                         if not isinstance(m, dict): return False
                         slug = m.get('slug', '')
                         if not slug or slug in seen_slugs: return False
-                        full_text = f"{m.get('question', '')} {slug}".lower()
-                        return all(t in full_text for t in search_terms)
+                        full_text = f"{m.get('question', '')} {slug} {extra_text}".lower()
+                        return all(_match_term(t, full_text) for t in search_terms)
 
                     # 軌道一：?q= API（markets + events 雙端點）
                     for q in search_terms:
@@ -577,7 +582,7 @@ with st.sidebar:
                                     for m in (ev.get('markets') or []):
                                         if isinstance(m, dict):
                                             if not m.get('question'): m['question'] = ev_title
-                                            if _match(m): _add(m, display_name=ev_title)
+                                            if _match(m, extra_text=ev_title): _add(m, display_name=ev_title)
                         except Exception:
                             pass
 
