@@ -534,32 +534,8 @@ with st.sidebar:
                     pass
 
             try:
-                # 股票代號對照表
-                TICKER_MAP = {
-                    'nvidia': ['nvidia', 'nvda'],
-                    'apple':  ['apple', 'aapl'],
-                    'microsoft': ['microsoft', 'msft'],
-                    'google': ['google', 'googl', 'alphabet'],
-                    'amazon': ['amazon', 'amzn'],
-                    'tesla':  ['tesla', 'tsla'],
-                    'meta':   ['meta', 'facebook'],
-                    'bitcoin': ['bitcoin', 'btc'],
-                    'ethereum': ['ethereum', 'eth'],
-                    'solana': ['solana', 'sol'],
-                    'ripple': ['ripple', 'xrp'],
-                    'tsmc':   ['tsmc', 'taiwan semiconductor'],
-                    'bubble': ['bubble', 'ai-bubble', 'ai bubble'],
-                    'agi':    ['agi', 'artificial-general', 'achieved-agi'],
-                    'ai':     ['openai', 'deepseek', 'anthropic', 'gemini', 'gpt', 'llm', 'artificial-intelligence', 'ai-bubble', 'top-ai-model'],
-                }
-                raw_terms = search_keyword.lower().split()
-                expanded = [TICKER_MAP.get(t, [t]) for t in raw_terms]
+                search_terms = search_keyword.lower().split()
 
-                hints = [f"`{t}` → {' / '.join(cs)}" for t, cs in zip(raw_terms, expanded) if len(cs) > 1]
-                if hints:
-                    st.caption("🔄 股票代號展開：" + "，".join(hints))
-
-                # 詞邊界比對（定義在迴圈外，避免重複定義）
                 def _match_term(term, text):
                     if len(term) <= 3:
                         return bool(re.search(r'(?<![a-z])' + re.escape(term) + r'(?![a-z])', text))
@@ -568,114 +544,90 @@ with st.sidebar:
                 seen_slugs = set()
                 valid_markets = []
 
-                def _add(m):
+                def _add(m, extra_text=''):
                     slug = m.get('slug', '')
                     if slug and slug not in seen_slugs:
                         seen_slugs.add(slug)
                         valid_markets.append({
                             'slug': slug,
-                            'display_name': m.get('question') or slug,
+                            'display_name': m.get('question') or extra_text or slug,
                             'vol': float(m.get('volume24hr', 0) or 0)
                         })
 
-                def _match(m):
+                def _match(m, extra_text=''):
                     if not isinstance(m, dict):
                         return False
                     slug = m.get('slug', '')
                     if not slug or slug in seen_slugs:
                         return False
-                    full_text = f"{m.get('question', '')} {slug}".lower()
-                    return all(any(_match_term(c, full_text) for c in _cands) for _cands in expanded)
+                    full_text = f"{m.get('question', '')} {slug} {extra_text}".lower()
+                    return all(_match_term(t, full_text) for t in search_terms)
 
-                with st.spinner("🚀 雙軌搜尋中 / Dual-track searching..."):
-                    api_queries = list(dict.fromkeys(c for cs in expanded for c in cs))
-                    st.caption(f"🔎 搜尋詞展開：{api_queries}")
-
-                    # 軌道一：?q= API（markets + events 雙端點）
-                    _t1_total = 0
-                    _t1_matched = 0
-                    for q in api_queries:
+                with st.spinner("🔍 搜尋中 / Searching..."):
+                    # 軌道一：?q= API 語意搜尋（markets + events 雙端點）
+                    for q in search_terms:
                         try:
-                            # 1a. markets 端點
-                            url_q = (
-                                f"https://gamma-api.polymarket.com/markets"
-                                f"?q={requests.utils.quote(q)}"
-                                f"&active=true&closed=false&limit=100"
+                            r_m = requests.get(
+                                f"https://gamma-api.polymarket.com/markets?q={requests.utils.quote(q)}&active=true&closed=false&limit=100",
+                                timeout=10
                             )
-                            r_q = requests.get(url_q, timeout=10)
-                            if r_q.ok:
-                                _batch_q = r_q.json()
-                                _t1_total += len(_batch_q)
-                                for m in _batch_q:
-                                    if _match(m):
-                                        _t1_matched += 1
-                                        _add(m)
+                            if r_m.ok:
+                                for m in r_m.json():
+                                    if _match(m): _add(m)
 
-                            # 1b. events 端點：抓 event 下的所有 markets
-                            url_ev = (
-                                f"https://gamma-api.polymarket.com/events"
-                                f"?q={requests.utils.quote(q)}"
-                                f"&active=true&closed=false&limit=50"
+                            r_ev = requests.get(
+                                f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(q)}&active=true&closed=false&limit=50",
+                                timeout=10
                             )
-                            r_ev = requests.get(url_ev, timeout=10)
                             if r_ev.ok:
                                 for ev in r_ev.json():
+                                    ev_title = ev.get('title', '')
                                     for m in (ev.get('markets') or []):
                                         if isinstance(m, dict):
-                                            # event 的 question 補進 market
                                             if not m.get('question'):
-                                                m['question'] = ev.get('title', '')
-                                            _t1_total += 1
-                                            if _match(m):
-                                                _t1_matched += 1
-                                                _add(m)
-                        except Exception as _eq:
-                            st.caption(f"軌道一錯誤: {_eq}")
+                                                m['question'] = ev_title
+                                            if _match(m, extra_text=ev_title): _add(m)
+                        except Exception:
+                            pass
 
-                    # 診斷：直接打 events?q=bubble 看回傳
-                    try:
-                        _diag = requests.get(
-                            f"https://gamma-api.polymarket.com/events?q={requests.utils.quote(raw_terms[0])}&active=true&closed=false&limit=5",
-                            timeout=10
-                        )
-                        if _diag.ok:
-                            _devs = _diag.json()
-                            st.caption(f"🔬 events API 回傳 {len(_devs)} 筆")
-                            for _ev in _devs[:3]:
-                                st.caption(f"  event title: {_ev.get('title','')} | slug: {_ev.get('slug','')}")
-                                for _sm in (_ev.get('markets') or [])[:2]:
-                                    st.caption(f"    market slug: {_sm.get('slug','')} | question: {_sm.get('question','')[:60]}")
-                    except Exception as _de:
-                        st.caption(f"診斷錯誤: {_de}")
-
-                    st.caption(f"軌道一：API 回傳 {_t1_total} 筆，命中 {_t1_matched} 筆")
-
-                    # 軌道二：本地過濾最新 1600 筆
-                    _t2_total = 0
-                    _t2_matched = 0
+                    # 軌道二：本地過濾最新 1600 筆活躍市場
                     for offset in range(0, 1600, 200):
-                        url_p = (
-                            f"https://gamma-api.polymarket.com/markets"
-                            f"?active=true&closed=false&limit=200&offset={offset}"
-                        )
-                        resp = requests.get(url_p, timeout=10)
-                        if not resp.ok:
+                        try:
+                            resp = requests.get(
+                                f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&offset={offset}",
+                                timeout=10
+                            )
+                            if not resp.ok: break
+                            batch = resp.json()
+                            if not batch or not isinstance(batch, list): break
+                            for m in batch:
+                                if _match(m): _add(m)
+                        except Exception:
                             break
-                        batch = resp.json()
-                        if not batch or not isinstance(batch, list):
-                            break
-                        _t2_total += len(batch)
-                        for m in batch:
-                            if _match(m):
-                                _t2_matched += 1
-                                _add(m)
-                    st.caption(f"軌道二：掃描 {_t2_total} 筆，命中 {_t2_matched} 筆")
 
                 valid_markets.sort(key=lambda x: x['vol'], reverse=True)
                 top_results = valid_markets[:12]
 
                 if not top_results:
-                    st.info("沒有找到高度相關的市場，請嘗試更換或縮短關鍵字。 / No markets found.")
+                    st.warning(f"😶 找不到「{search_keyword}」的相關市場 / No results found")
+                    st.markdown("""
+**可能原因：**
+- Polymarket 市場命名與搜尋詞不同（例如搜 `bubble`，實際 slug 是 `ai-industry-downturn`）
+- 此市場為某 Event 的子選項，slug 與標題關鍵字不同
+- 市場目前不在活躍列表中（已結算或流動性極低）
+
+**建議策略：**
+
+① **換同義詞或相關詞**
+`bubble` → 試 `downturn` / `crash`；`agi` → 試 `artificial general` / `achieved`
+
+② **去 Polymarket 官網直接找 slug**
+前往 polymarket.com 搜尋，找到市場後複製網址最後一段即為 slug
+例：`polymarket.com/event/ai-bubble-burst-by` → event slug 是 `ai-bubble-burst-by`
+
+③ **直接輸入已知 slug**
+將 slug 貼入上方 Copula 工具的輸入框直接使用，不需透過搜尋
+""")
                 else:
                     st.success(f"✅ 找到 {len(top_results)} 個市場 / Found {len(top_results)} markets:")
                     for res in top_results:
